@@ -41,7 +41,7 @@ export GRSAI_BASE_URL="https://grsaiapi.com"
 ```toml
 [mcp_servers.grsai-image]
 command = "node"
-args = ["/Users/boyan/Desktop/Tools/image-gen/dist/src/index.js"]
+args = ["/Users/boyan/Desktop/Tools/grsai-canvas/dist/src/index.js"]
 tool_timeout_sec = 360
 default_tools_approval_mode = "writes"
 
@@ -58,7 +58,7 @@ GRSAI_API_KEY = "你的密钥"
 ```toml
 [mcp_servers.grsai-image]
 command = "node"
-args = ["/Users/boyan/Desktop/Tools/image-gen/dist/src/index.js"]
+args = ["/Users/boyan/Desktop/Tools/grsai-canvas/dist/src/index.js"]
 env_vars = ["GRSAI_API_KEY", "GRSAI_BASE_URL"]
 tool_timeout_sec = 360
 default_tools_approval_mode = "writes"
