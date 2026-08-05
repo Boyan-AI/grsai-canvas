@@ -1,0 +1,26 @@
+{
+  "name": "grsai-image-mcp",
+  "version": "0.1.0",
+  "private": true,
+  "description": "供 Codex 调用的 Grsai 生图 MCP 服务",
+  "type": "module",
+  "bin": {
+    "grsai-image-mcp": "dist/src/index.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/src/index.js",
+    "test": "npm run build && node --test dist/test/*.test.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.30.0",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "26.1.2",
+    "typescript": "7.0.2"
+  }
+}

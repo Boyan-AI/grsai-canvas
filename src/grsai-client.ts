@@ -1,0 +1,185 @@
+import type { GrsaiConfig } from "./config.js";
+import {
+  GenerationResponseSchema,
+  OpenAiGenerationResponseSchema,
+  type GenerateImageRequest,
+  type GenerationResponse,
+  type OpenAiGenerateImageRequest,
+  type OpenAiGenerationResponse,
+} from "./contracts.js";
+import { GrsaiError } from "./errors.js";
+
+type Sleep = (milliseconds: number) => Promise<void>;
+
+/** 封装 Grsai 原生与 OpenAI 兼容生图接口，并统一处理鉴权、超时和错误。 */
+export class GrsaiClient {
+  constructor(
+    private readonly config: GrsaiConfig,
+    private readonly fetcher: typeof fetch = fetch,
+    private readonly sleep: Sleep = (milliseconds) =>
+      new Promise((resolve) => setTimeout(resolve, milliseconds)),
+  ) {}
+
+  /** 提交原生 Grsai 生图任务。 */
+  async generate(request: GenerateImageRequest): Promise<GenerationResponse> {
+    const payload = await this.requestJson("/v1/api/generate", {
+      method: "POST",
+      body: JSON.stringify(request),
+    });
+    return this.parseGenerationResponse(payload);
+  }
+
+  /** 查询异步生图任务状态。 */
+  async getResult(id: string): Promise<GenerationResponse> {
+    const path = `/v1/api/result?id=${encodeURIComponent(id)}`;
+    const payload = await this.requestJson(path, { method: "GET" });
+    return this.parseGenerationResponse(payload);
+  }
+
+  /** 轮询任务直至完成、失败或达到调用方给定的等待上限。 */
+  async waitForResult(
+    id: string,
+    timeoutMs: number,
+    pollIntervalMs = this.config.pollIntervalMs,
+  ): Promise<GenerationResponse> {
+    const deadline = Date.now() + timeoutMs;
+    let result = await this.getResult(id);
+    while (result.status === "running") {
+      if (Date.now() + pollIntervalMs > deadline) {
+        throw new GrsaiError("等待生图任务超时，可使用任务 ID 稍后查询", {
+          code: "POLL_TIMEOUT",
+          retryable: true,
+        });
+      }
+      await this.sleep(pollIntervalMs);
+      result = await this.getResult(id);
+    }
+    return result;
+  }
+
+  /** 调用 OpenAI 兼容的同步图片生成接口。 */
+  async generateOpenAi(
+    request: OpenAiGenerateImageRequest,
+  ): Promise<OpenAiGenerationResponse> {
+    const payload = await this.requestJson("/v1/images/generations", {
+      method: "POST",
+      body: JSON.stringify(request),
+    });
+    const parsed = OpenAiGenerationResponseSchema.safeParse(payload);
+    if (!parsed.success) {
+      throw new GrsaiError("Grsai 返回了无法识别的兼容接口响应", {
+        code: "INVALID_RESPONSE",
+      });
+    }
+    return parsed.data;
+  }
+
+  /** 发送 JSON 请求并把 HTTP/网络异常转换为稳定错误。 */
+  private async requestJson(path: string, init: RequestInit): Promise<unknown> {
+    if (!this.config.apiKey) {
+      throw new GrsaiError("缺少 GRSAI_API_KEY 环境变量", {
+        code: "MISSING_API_KEY",
+      });
+    }
+    const controller = new AbortController();
+    const timeout = setTimeout(
+      () => controller.abort(),
+      this.config.requestTimeoutMs,
+    );
+    try {
+      const response = await this.fetcher(`${this.config.baseUrl}${path}`, {
+        ...init,
+        headers: {
+          Authorization: `Bearer ${this.config.apiKey}`,
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        signal: controller.signal,
+      });
+      const payload = await parseJsonSafely(response);
+      if (!response.ok) {
+        throw new GrsaiError(extractErrorMessage(payload, response.status), {
+          code: "HTTP_ERROR",
+          status: response.status,
+          retryable: response.status === 429 || response.status >= 500,
+        });
+      }
+      return payload;
+    } catch (error) {
+      if (error instanceof GrsaiError) {
+        throw error;
+      }
+      if ((error as Error).name === "AbortError") {
+        throw new GrsaiError("Grsai 请求超时", {
+          code: "REQUEST_TIMEOUT",
+          retryable: true,
+        });
+      }
+      throw new GrsaiError("无法连接 Grsai 服务", {
+        code: "NETWORK_ERROR",
+        retryable: true,
+      });
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  /** 校验原生接口响应，并将失败或违规状态转换为明确错误。 */
+  private parseGenerationResponse(payload: unknown): GenerationResponse {
+    const parsed = GenerationResponseSchema.safeParse(payload);
+    if (!parsed.success) {
+      throw new GrsaiError("Grsai 返回了无法识别的任务响应", {
+        code: "INVALID_RESPONSE",
+      });
+    }
+    if (parsed.data.status === "failed" || parsed.data.status === "violation") {
+      throw new GrsaiError(
+        parsed.data.error ||
+          (parsed.data.status === "violation"
+            ? "生成内容未通过安全检查"
+            : "图片生成失败"),
+        {
+          code:
+            parsed.data.status === "violation"
+              ? "CONTENT_VIOLATION"
+              : "GENERATION_FAILED",
+        },
+      );
+    }
+    return parsed.data;
+  }
+}
+
+/** 安全解析 JSON，避免把完整非 JSON 响应泄露到错误信息。 */
+async function parseJsonSafely(response: Response): Promise<unknown> {
+  try {
+    return await response.json();
+  } catch {
+    throw new GrsaiError("Grsai 返回了非 JSON 响应", {
+      code: "INVALID_JSON",
+      status: response.status,
+      retryable: response.status >= 500,
+    });
+  }
+}
+
+/** 从已解析错误对象中提取有限的公开错误文本。 */
+function extractErrorMessage(payload: unknown, status: number): string {
+  if (typeof payload === "object" && payload !== null) {
+    const record = payload as Record<string, unknown>;
+    if (typeof record.error === "string") {
+      return record.error.slice(0, 500);
+    }
+    if (
+      typeof record.error === "object" &&
+      record.error !== null &&
+      typeof (record.error as Record<string, unknown>).message === "string"
+    ) {
+      return String((record.error as Record<string, unknown>).message).slice(
+        0,
+        500,
+      );
+    }
+  }
+  return `Grsai 请求失败，HTTP ${status}`;
+}
