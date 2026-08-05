@@ -1,4 +1,4 @@
-# Grsai Image MCP
+# Grsai Canvas
 
 面向 Codex 的本地 STDIO MCP 服务，封装 Grsai 图片生成、异步任务查询、参考图上传和结果下载。
 

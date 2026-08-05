@@ -45,7 +45,7 @@ export function createServer(
   const client = dependencies.client ?? new GrsaiClient(config);
   const fetcher = dependencies.fetcher ?? fetch;
   const server = new McpServer(
-    { name: "grsai-image", version: "0.1.0" },
+    { name: "grsai-canvas", version: "0.1.0" },
     {
       instructions:
         "generate_image 可能产生费用，调用前确认用户确实要求生图。需要最终文件时传入绝对 output_dir 并等待完成；超时或异步提交后使用 get_generation 查询任务。",
