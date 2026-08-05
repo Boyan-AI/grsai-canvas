@@ -8,6 +8,7 @@
 - `get_generation`：按任务 ID 查询进度和结果 URL，不创建新任务。
 - 支持 HTTPS URL、data URL 和本地文件作为参考图。
 - 同时实现 Grsai 原生接口和 OpenAI 兼容的 `/v1/images/generations` 接口。
+- 失败响应包含本地请求 ID、故障阶段、耗时、超时预算和上游请求 ID 等安全诊断字段。
 
 `/v1/chat/completions` 不属于生图主链路，因此未作为 MCP 工具暴露。
 
@@ -31,6 +32,17 @@ export GRSAI_API_KEY="你的密钥"
 ```bash
 export GRSAI_BASE_URL="https://grsaiapi.com"
 ```
+
+可按网络和 MCP 客户端预算调整分阶段超时：
+
+```bash
+export GRSAI_SUBMIT_TIMEOUT_MS="120000"
+export GRSAI_STATUS_TIMEOUT_MS="30000"
+export GRSAI_SYNC_GENERATION_TIMEOUT_MS="300000"
+export GRSAI_DOWNLOAD_TIMEOUT_MS="45000"
+```
+
+默认预算分别是异步提交 120 秒、状态查询 30 秒、同步生成 300 秒和结果下载 45 秒。旧版 `GRSAI_REQUEST_TIMEOUT_MS` 仍可作为提交、查询和同步生成的统一回退值，但不推荐继续使用。修改后应确保“提交或同步生成 + 轮询 + 下载”的总预算小于 MCP `tool_timeout_sec`。
 
 ## Codex 配置
 
@@ -78,6 +90,25 @@ default_tools_approval_mode = "writes"
 - “用 nano-banana-2 生成一张 4K 的未来城市夜景。”
 - “以 `/absolute/path/reference.png` 为参考图，把画面改成水彩风格。”
 - “查询 Grsai 任务 `task-id` 的生成结果。”
+
+## 超时与异步语义
+
+- `wait_timeout_seconds` 只控制原生接口返回任务 ID 后的轮询时间，不控制任务提交、同步生成或下载。
+- 原生接口查询超时但已有任务 ID 时，工具返回 `status: running`，可稍后使用 `get_generation`，不要重新创建付费任务。
+- 提交或同步生成超时且没有任务 ID 时，错误中的 `acceptance_unknown: true` 表示上游可能已经接收或计费。应使用 `request_id` 联查日志或账单，不要盲目重试。
+- `openai-compatible` 是同步接口，不返回可供 `get_generation` 查询的真实任务 ID；优先使用默认 `native` 后端。
+
+错误响应的 `phase` 为 `input`、`submit`、`poll`、`sync_generate` 或 `download`，可用于快速定位失败阶段。服务不会在错误中返回 API Key 或完整上游响应体。
+
+## 输入与尺寸边界
+
+- 本地文件和 data URL 会内联进 JSON。单张默认最多 10 MB，所有内联参考图解码后合计默认最多 8 MB；可用 `GRSAI_MAX_REFERENCE_BYTES` 和 `GRSAI_MAX_REFERENCE_TOTAL_BYTES` 调整。
+- 多张大图应先缩小或压缩；已有安全 HTTPS 地址时优先传 URL，避免 Base64 约 33% 的体积膨胀。
+- `gpt-image-2` 系列像素值仅接受 `1024x1024`、`1536x1024`、`1024x1536`。比例参数由供应商按 best-effort 方式处理，不承诺任意精确像素映射。
+- OpenAI 兼容后端仅接受 `auto` 或上述标准像素值；需要比例参数时使用原生后端。
+- `image_size` 只适用于 nano-banana 系列；gpt-image-2 使用 `aspect_ratio`。
+
+生图模型不是精确排版或逐帧动画引擎。Sprite Sheet、固定网格、严格透明补格等任务应拆成“生成角色素材或单组动作，再由本地程序确定性裁切、排版和校验”，不要依赖一次提示词精确完成最终图集。
 
 生成图片可能产生费用。`generate_image` 被标记为外部写操作，Codex 应在用户未明确要求生图时先确认。
 

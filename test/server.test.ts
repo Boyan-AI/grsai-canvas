@@ -12,9 +12,13 @@ function testConfig(): GrsaiConfig {
   return {
     apiKey: "test-key",
     baseUrl: "https://api.example.test",
-    requestTimeoutMs: 1_000,
+    submitTimeoutMs: 1_000,
+    statusTimeoutMs: 1_000,
+    syncGenerationTimeoutMs: 1_000,
+    downloadTimeoutMs: 1_000,
     pollIntervalMs: 1,
     maxReferenceImageBytes: 1_024,
+    maxReferenceTotalBytes: 2_048,
     maxDownloadBytes: 1_024,
   };
 }
@@ -104,5 +108,135 @@ test("编译后的 STDIO 服务在缺少密钥时仍可列出工具", async () =
     );
   } finally {
     await client.close();
+  }
+});
+
+test("提交超时返回包含阶段与重复计费风险的结构化错误", async () => {
+  const config = { ...testConfig(), submitTimeoutMs: 10 };
+  const fetcher = (async (_input: RequestInfo | URL, init?: RequestInit) =>
+    new Promise<Response>((_resolve, reject) => {
+      init?.signal?.addEventListener("abort", () => {
+        reject(new DOMException("aborted", "AbortError"));
+      });
+    })) as typeof fetch;
+  const server = createServer(config, {
+    client: new GrsaiClient(config, fetcher),
+  });
+  const client = new Client({ name: "grsai-test", version: "1.0.0" });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+  await Promise.all([
+    server.connect(serverTransport),
+    client.connect(clientTransport),
+  ]);
+  try {
+    const generated = await client.callTool({
+      name: "generate_image",
+      arguments: { prompt: "未来城市", wait: false },
+    });
+    const output = generated.structuredContent as
+      | Record<string, unknown>
+      | undefined;
+    const error = output?.error as Record<string, unknown> | undefined;
+
+    assert.equal(generated.isError, true);
+    assert.equal(output?.status, "failed");
+    assert.equal(error?.phase, "submit");
+    assert.equal(error?.acceptance_unknown, true);
+    assert.equal(typeof output?.request_id, "string");
+  } finally {
+    await client.close();
+    await server.close();
+  }
+});
+
+test("不可靠尺寸组合会在计费调用前被拒绝", async () => {
+  let called = false;
+  const fetcher = (async () => {
+    called = true;
+    return Response.json({ id: "unexpected", status: "running" });
+  }) as typeof fetch;
+  const config = testConfig();
+  const server = createServer(config, {
+    client: new GrsaiClient(config, fetcher),
+  });
+  const client = new Client({ name: "grsai-test", version: "1.0.0" });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+  await Promise.all([
+    server.connect(serverTransport),
+    client.connect(clientTransport),
+  ]);
+  try {
+    const generated = await client.callTool({
+      name: "generate_image",
+      arguments: {
+        prompt: "动作图集",
+        model: "gpt-image-2",
+        aspect_ratio: "1536x208",
+        wait: false,
+      },
+    });
+    const ignoredImageSize = await client.callTool({
+      name: "generate_image",
+      arguments: {
+        prompt: "动作图集",
+        model: "gpt-image-2",
+        image_size: "2K",
+        wait: false,
+      },
+    });
+    const incompatibleRatio = await client.callTool({
+      name: "generate_image",
+      arguments: {
+        prompt: "动作图集",
+        model: "gpt-image-2",
+        backend: "openai-compatible",
+        aspect_ratio: "3:2",
+        wait: false,
+      },
+    });
+
+    assert.equal(generated.isError, true);
+    assert.equal(ignoredImageSize.isError, true);
+    assert.equal(incompatibleRatio.isError, true);
+    assert.equal(called, false);
+  } finally {
+    await client.close();
+    await server.close();
+  }
+});
+
+test("已有任务的状态查询超时会返回可恢复的 running 结果", async () => {
+  const config = { ...testConfig(), statusTimeoutMs: 10 };
+  const fetcher = (async (_input: RequestInfo | URL, init?: RequestInit) =>
+    new Promise<Response>((_resolve, reject) => {
+      init?.signal?.addEventListener("abort", () => {
+        reject(new DOMException("aborted", "AbortError"));
+      });
+    })) as typeof fetch;
+  const server = createServer(config, {
+    client: new GrsaiClient(config, fetcher),
+  });
+  const client = new Client({ name: "grsai-test", version: "1.0.0" });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+  await Promise.all([
+    server.connect(serverTransport),
+    client.connect(clientTransport),
+  ]);
+  try {
+    const queried = await client.callTool({
+      name: "get_generation",
+      arguments: { id: "task-recoverable" },
+    });
+    const output = queried.structuredContent as Record<string, unknown>;
+
+    assert.equal(queried.isError, undefined);
+    assert.equal(output.status, "running");
+    assert.equal(output.id, "task-recoverable");
+  } finally {
+    await client.close();
+    await server.close();
   }
 });

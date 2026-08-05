@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { GrsaiConfig } from "./config.js";
 import {
   GenerationResponseSchema,
@@ -7,9 +8,21 @@ import {
   type OpenAiGenerateImageRequest,
   type OpenAiGenerationResponse,
 } from "./contracts.js";
-import { GrsaiError } from "./errors.js";
+import { GrsaiError, type ErrorPhase } from "./errors.js";
 
 type Sleep = (milliseconds: number) => Promise<void>;
+
+interface RequestContext {
+  requestId?: string;
+  timeoutMs?: number;
+}
+
+interface ResolvedRequestContext {
+  requestId: string;
+  timeoutMs: number;
+  phase: ErrorPhase;
+  acceptanceUnknownOnTimeout: boolean;
+}
 
 /** 封装 Grsai 原生与 OpenAI 兼容生图接口，并统一处理鉴权、超时和错误。 */
 export class GrsaiClient {
@@ -21,18 +34,42 @@ export class GrsaiClient {
   ) {}
 
   /** 提交原生 Grsai 生图任务。 */
-  async generate(request: GenerateImageRequest): Promise<GenerationResponse> {
-    const payload = await this.requestJson("/v1/api/generate", {
-      method: "POST",
-      body: JSON.stringify(request),
-    });
+  async generate(
+    request: GenerateImageRequest,
+    context: RequestContext = {},
+  ): Promise<GenerationResponse> {
+    const payload = await this.requestJson(
+      "/v1/api/generate",
+      {
+        method: "POST",
+        body: JSON.stringify(request),
+      },
+      {
+        requestId: context.requestId ?? randomUUID(),
+        timeoutMs: context.timeoutMs ?? this.config.submitTimeoutMs,
+        phase: "submit",
+        acceptanceUnknownOnTimeout: true,
+      },
+    );
     return this.parseGenerationResponse(payload);
   }
 
   /** 查询异步生图任务状态。 */
-  async getResult(id: string): Promise<GenerationResponse> {
+  async getResult(
+    id: string,
+    context: RequestContext = {},
+  ): Promise<GenerationResponse> {
     const path = `/v1/api/result?id=${encodeURIComponent(id)}`;
-    const payload = await this.requestJson(path, { method: "GET" });
+    const payload = await this.requestJson(
+      path,
+      { method: "GET" },
+      {
+        requestId: context.requestId ?? randomUUID(),
+        timeoutMs: context.timeoutMs ?? this.config.statusTimeoutMs,
+        phase: "poll",
+        acceptanceUnknownOnTimeout: false,
+      },
+    );
     return this.parseGenerationResponse(payload);
   }
 
@@ -41,30 +78,69 @@ export class GrsaiClient {
     id: string,
     timeoutMs: number,
     pollIntervalMs = this.config.pollIntervalMs,
+    context: RequestContext = {},
   ): Promise<GenerationResponse> {
-    const deadline = Date.now() + timeoutMs;
-    let result = await this.getResult(id);
+    const startedAt = Date.now();
+    const deadline = startedAt + timeoutMs;
+    const requestId = context.requestId ?? randomUUID();
+    let result = await this.getResultWithinDeadline(id, deadline, requestId);
     while (result.status === "running") {
       if (Date.now() + pollIntervalMs > deadline) {
         throw new GrsaiError("等待生图任务超时，可使用任务 ID 稍后查询", {
           code: "POLL_TIMEOUT",
           retryable: true,
+          phase: "poll",
+          requestId,
+          elapsedMs: Date.now() - startedAt,
+          timeoutMs,
         });
       }
       await this.sleep(pollIntervalMs);
-      result = await this.getResult(id);
+      result = await this.getResultWithinDeadline(id, deadline, requestId);
     }
     return result;
+  }
+
+  /** 在轮询总预算内查询一次，避免单次状态请求突破调用方截止时间。 */
+  private async getResultWithinDeadline(
+    id: string,
+    deadline: number,
+    requestId: string,
+  ): Promise<GenerationResponse> {
+    const remainingMs = deadline - Date.now();
+    if (remainingMs <= 0) {
+      throw new GrsaiError("等待生图任务超时，可使用任务 ID 稍后查询", {
+        code: "POLL_TIMEOUT",
+        retryable: true,
+        phase: "poll",
+        requestId,
+        timeoutMs: 0,
+      });
+    }
+    return this.getResult(id, {
+      requestId,
+      timeoutMs: Math.min(this.config.statusTimeoutMs, remainingMs),
+    });
   }
 
   /** 调用 OpenAI 兼容的同步图片生成接口。 */
   async generateOpenAi(
     request: OpenAiGenerateImageRequest,
+    context: RequestContext = {},
   ): Promise<OpenAiGenerationResponse> {
-    const payload = await this.requestJson("/v1/images/generations", {
-      method: "POST",
-      body: JSON.stringify(request),
-    });
+    const payload = await this.requestJson(
+      "/v1/images/generations",
+      {
+        method: "POST",
+        body: JSON.stringify(request),
+      },
+      {
+        requestId: context.requestId ?? randomUUID(),
+        timeoutMs: context.timeoutMs ?? this.config.syncGenerationTimeoutMs,
+        phase: "sync_generate",
+        acceptanceUnknownOnTimeout: true,
+      },
+    );
     const parsed = OpenAiGenerationResponseSchema.safeParse(payload);
     if (!parsed.success) {
       throw new GrsaiError("Grsai 返回了无法识别的兼容接口响应", {
@@ -75,17 +151,19 @@ export class GrsaiClient {
   }
 
   /** 发送 JSON 请求并把 HTTP/网络异常转换为稳定错误。 */
-  private async requestJson(path: string, init: RequestInit): Promise<unknown> {
+  private async requestJson(
+    path: string,
+    init: RequestInit,
+    context: ResolvedRequestContext,
+  ): Promise<unknown> {
     if (!this.config.apiKey) {
       throw new GrsaiError("缺少 GRSAI_API_KEY 环境变量", {
         code: "MISSING_API_KEY",
       });
     }
+    const startedAt = Date.now();
     const controller = new AbortController();
-    const timeout = setTimeout(
-      () => controller.abort(),
-      this.config.requestTimeoutMs,
-    );
+    const timeout = setTimeout(() => controller.abort(), context.timeoutMs);
     try {
       const response = await this.fetcher(`${this.config.baseUrl}${path}`, {
         ...init,
@@ -98,10 +176,15 @@ export class GrsaiClient {
       });
       const payload = await parseJsonSafely(response);
       if (!response.ok) {
+        const upstreamRequestId = extractUpstreamRequestId(response);
         throw new GrsaiError(extractErrorMessage(payload, response.status), {
           code: "HTTP_ERROR",
           status: response.status,
           retryable: response.status === 429 || response.status >= 500,
+          phase: context.phase,
+          requestId: context.requestId,
+          ...(upstreamRequestId ? { upstreamRequestId } : {}),
+          elapsedMs: Date.now() - startedAt,
         });
       }
       return payload;
@@ -113,11 +196,20 @@ export class GrsaiClient {
         throw new GrsaiError("Grsai 请求超时", {
           code: "REQUEST_TIMEOUT",
           retryable: true,
+          phase: context.phase,
+          requestId: context.requestId,
+          elapsedMs: Date.now() - startedAt,
+          timeoutMs: context.timeoutMs,
+          acceptanceUnknown: context.acceptanceUnknownOnTimeout,
         });
       }
       throw new GrsaiError("无法连接 Grsai 服务", {
         code: "NETWORK_ERROR",
         retryable: true,
+        phase: context.phase,
+        requestId: context.requestId,
+        elapsedMs: Date.now() - startedAt,
+        acceptanceUnknown: context.acceptanceUnknownOnTimeout,
       });
     } finally {
       clearTimeout(timeout);
@@ -148,6 +240,16 @@ export class GrsaiClient {
     }
     return parsed.data;
   }
+}
+
+/** 提取常见上游请求标识，便于在不暴露响应体的情况下联查日志。 */
+function extractUpstreamRequestId(response: Response): string | undefined {
+  return (
+    response.headers.get("x-request-id") ??
+    response.headers.get("request-id") ??
+    response.headers.get("cf-ray") ??
+    undefined
+  )?.slice(0, 200);
 }
 
 /** 安全解析 JSON，避免把完整非 JSON 响应泄露到错误信息。 */

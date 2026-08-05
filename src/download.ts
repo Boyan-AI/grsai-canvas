@@ -17,6 +17,8 @@ export async function downloadImages(
   taskId: string,
   maxBytes: number,
   fetcher: typeof fetch = fetch,
+  timeoutMs = 45_000,
+  requestId?: string,
 ): Promise<string[]> {
   const directory = resolve(outputDir);
   await mkdir(directory, { recursive: true });
@@ -30,35 +32,73 @@ export async function downloadImages(
       });
     }
 
-    const response = await fetcher(url, { redirect: "follow" });
-    if (!response.ok) {
-      throw new GrsaiError(`下载生成结果失败，HTTP ${response.status}`, {
-        code: "DOWNLOAD_FAILED",
-        status: response.status,
-        retryable: response.status >= 500,
+    const startedAt = Date.now();
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const response = await fetcher(url, {
+        redirect: "follow",
+        signal: controller.signal,
       });
-    }
-    const contentLength = Number(response.headers.get("content-length") ?? 0);
-    if (contentLength > maxBytes) {
-      throw new GrsaiError("生成结果超过下载大小限制", {
-        code: "DOWNLOAD_TOO_LARGE",
-      });
-    }
-    const bytes = Buffer.from(await response.arrayBuffer());
-    if (bytes.byteLength > maxBytes) {
-      throw new GrsaiError("生成结果超过下载大小限制", {
-        code: "DOWNLOAD_TOO_LARGE",
-      });
-    }
+      if (!response.ok) {
+        throw new GrsaiError(`下载生成结果失败，HTTP ${response.status}`, {
+          code: "DOWNLOAD_FAILED",
+          status: response.status,
+          retryable: response.status >= 500,
+          phase: "download",
+          ...(requestId ? { requestId } : {}),
+          elapsedMs: Date.now() - startedAt,
+        });
+      }
+      const contentLength = Number(response.headers.get("content-length") ?? 0);
+      if (contentLength > maxBytes) {
+        throw new GrsaiError("生成结果超过下载大小限制", {
+          code: "DOWNLOAD_TOO_LARGE",
+          phase: "download",
+          ...(requestId ? { requestId } : {}),
+        });
+      }
+      const bytes = Buffer.from(await response.arrayBuffer());
+      if (bytes.byteLength > maxBytes) {
+        throw new GrsaiError("生成结果超过下载大小限制", {
+          code: "DOWNLOAD_TOO_LARGE",
+          phase: "download",
+          ...(requestId ? { requestId } : {}),
+        });
+      }
 
-    const extension = inferExtension(
-      response.headers.get("content-type"),
-      url.pathname,
-    );
-    const baseName = `grsai-${safeTaskId(taskId)}-${index + 1}`;
-    downloaded.push(
-      await writeWithoutOverwrite(directory, baseName, extension, bytes),
-    );
+      const extension = inferExtension(
+        response.headers.get("content-type"),
+        url.pathname,
+      );
+      const baseName = `grsai-${safeTaskId(taskId)}-${index + 1}`;
+      downloaded.push(
+        await writeWithoutOverwrite(directory, baseName, extension, bytes),
+      );
+    } catch (error) {
+      if (error instanceof GrsaiError) {
+        throw error;
+      }
+      if ((error as Error).name === "AbortError") {
+        throw new GrsaiError("下载生成结果超时", {
+          code: "DOWNLOAD_TIMEOUT",
+          retryable: true,
+          phase: "download",
+          ...(requestId ? { requestId } : {}),
+          elapsedMs: Date.now() - startedAt,
+          timeoutMs,
+        });
+      }
+      throw new GrsaiError("无法下载生成结果", {
+        code: "DOWNLOAD_FAILED",
+        retryable: true,
+        phase: "download",
+        ...(requestId ? { requestId } : {}),
+        elapsedMs: Date.now() - startedAt,
+      });
+    } finally {
+      clearTimeout(timeout);
+    }
   }
   return downloaded;
 }

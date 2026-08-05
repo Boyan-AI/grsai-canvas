@@ -41,6 +41,12 @@ export const ASPECT_RATIOS = [
 
 export const IMAGE_SIZES = ["1K", "2K", "4K"] as const;
 
+export const GPT_IMAGE_PIXEL_SIZES = [
+  "1024x1024",
+  "1536x1024",
+  "1024x1536",
+] as const;
+
 export const GenerationStatusSchema = z.enum([
   "running",
   "violation",
@@ -76,6 +82,7 @@ export const OpenAiGenerationResponseSchema = z.object({
 export type ImageModel = (typeof IMAGE_MODELS)[number];
 export type AspectRatio = (typeof ASPECT_RATIOS)[number];
 export type ImageSize = (typeof IMAGE_SIZES)[number];
+export type GptImagePixelSize = (typeof GPT_IMAGE_PIXEL_SIZES)[number];
 export type GenerationResponse = z.infer<typeof GenerationResponseSchema>;
 export type OpenAiGenerationResponse = z.infer<
   typeof OpenAiGenerationResponseSchema
@@ -86,7 +93,7 @@ export interface GenerateImageRequest {
   model: ImageModel;
   prompt: string;
   images?: string[];
-  aspectRatio?: AspectRatio | `${number}x${number}`;
+  aspectRatio?: AspectRatio | GptImagePixelSize;
   imageSize?: ImageSize;
   replyType?: "json" | "async";
 }
@@ -96,6 +103,6 @@ export interface OpenAiGenerateImageRequest {
   model: ImageModel;
   prompt: string;
   image?: string[];
-  size?: AspectRatio | `${number}x${number}`;
+  size?: AspectRatio | GptImagePixelSize;
   response_format?: "url";
 }

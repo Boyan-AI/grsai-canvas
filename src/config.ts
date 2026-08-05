@@ -2,9 +2,13 @@
 export interface GrsaiConfig {
   apiKey: string;
   baseUrl: string;
-  requestTimeoutMs: number;
+  submitTimeoutMs: number;
+  statusTimeoutMs: number;
+  syncGenerationTimeoutMs: number;
+  downloadTimeoutMs: number;
   pollIntervalMs: number;
   maxReferenceImageBytes: number;
+  maxReferenceTotalBytes: number;
   maxDownloadBytes: number;
 }
 
@@ -13,22 +17,50 @@ const DEFAULT_BASE_URL = "https://grsai.dakka.com.cn";
 /** 从环境变量读取配置；密钥缺失时仍允许 MCP 启动以暴露工具。 */
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): GrsaiConfig {
   const apiKey = env.GRSAI_API_KEY?.trim() ?? "";
-
   const baseUrl = normalizeBaseUrl(env.GRSAI_BASE_URL ?? DEFAULT_BASE_URL);
+  const legacyRequestTimeoutMs = readOptionalPositiveInteger(
+    env.GRSAI_REQUEST_TIMEOUT_MS,
+  );
   return {
     apiKey,
     baseUrl,
-    requestTimeoutMs: readPositiveInteger(env.GRSAI_REQUEST_TIMEOUT_MS, 60_000),
+    submitTimeoutMs: readPositiveInteger(
+      env.GRSAI_SUBMIT_TIMEOUT_MS,
+      legacyRequestTimeoutMs ?? 120_000,
+    ),
+    statusTimeoutMs: readPositiveInteger(
+      env.GRSAI_STATUS_TIMEOUT_MS,
+      legacyRequestTimeoutMs ?? 30_000,
+    ),
+    syncGenerationTimeoutMs: readPositiveInteger(
+      env.GRSAI_SYNC_GENERATION_TIMEOUT_MS,
+      legacyRequestTimeoutMs ?? 300_000,
+    ),
+    downloadTimeoutMs: readPositiveInteger(
+      env.GRSAI_DOWNLOAD_TIMEOUT_MS,
+      45_000,
+    ),
     pollIntervalMs: readPositiveInteger(env.GRSAI_POLL_INTERVAL_MS, 2_000),
     maxReferenceImageBytes: readPositiveInteger(
       env.GRSAI_MAX_REFERENCE_BYTES,
       10 * 1024 * 1024,
+    ),
+    maxReferenceTotalBytes: readPositiveInteger(
+      env.GRSAI_MAX_REFERENCE_TOTAL_BYTES,
+      8 * 1024 * 1024,
     ),
     maxDownloadBytes: readPositiveInteger(
       env.GRSAI_MAX_DOWNLOAD_BYTES,
       50 * 1024 * 1024,
     ),
   };
+}
+
+/** 读取可选正整数环境变量，兼容旧版共享请求超时配置。 */
+function readOptionalPositiveInteger(
+  value: string | undefined,
+): number | undefined {
+  return value === undefined ? undefined : readPositiveInteger(value, 1);
 }
 
 /** 规范化并校验 Grsai 基础节点，避免请求被发送到非 HTTPS 地址。 */
