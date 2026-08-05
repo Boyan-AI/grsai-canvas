@@ -21,9 +21,13 @@ function testConfig(): GrsaiConfig {
 
 test("MCP 暴露生成与查询工具并可完成原生任务", async () => {
   let resultQueries = 0;
-  const fetcher = (async (input: RequestInfo | URL) => {
+  let submittedModel = "";
+  const fetcher = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     if (url.includes("/v1/api/generate")) {
+      submittedModel = String(
+        (JSON.parse(String(init?.body)) as { model?: unknown }).model ?? "",
+      );
       return Response.json({ id: "task-mcp", status: "running" });
     }
     resultQueries += 1;
@@ -56,7 +60,6 @@ test("MCP 暴露生成与查询工具并可完成原生任务", async () => {
       name: "generate_image",
       arguments: {
         prompt: "未来城市",
-        model: "nano-banana-2",
         wait: true,
         wait_timeout_seconds: 10,
       },
@@ -66,6 +69,7 @@ test("MCP 暴露生成与查询工具并可完成原生任务", async () => {
       (generated.structuredContent as { status?: unknown } | undefined)?.status,
       "succeeded",
     );
+    assert.equal(submittedModel, "gpt-image-2");
     assert.equal(resultQueries, 1);
 
     const queried = await client.callTool({

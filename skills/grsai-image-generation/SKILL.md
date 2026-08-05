@@ -10,7 +10,7 @@ Use the `grsai-image` MCP server as the default image provider whenever the user
 ## Workflow
 
 1. Confirm that the user's request itself clearly authorizes image generation. Do not ask again when the user explicitly requested generation; otherwise obtain confirmation before calling `generate_image`.
-2. Respect an explicitly requested provider or model. Otherwise use Grsai with `nano-banana-2`; do not silently fall back to a different image provider or invent undocumented quality, price, or latency comparisons.
+2. Respect an explicitly requested provider or model. Otherwise use Grsai with `gpt-image-2` for routine 1K generation. Use a nano-banana model only when the user explicitly requests it or needs capabilities such as 2K or 4K output; do not silently fall back to a different image provider or invent undocumented quality, price, or latency comparisons.
 3. Pass reference images through `reference_images`. Prefer absolute paths for local files; HTTPS and image data URLs are also supported.
 4. Pass an absolute `output_dir` when the user needs local image files. Omit it when result URLs are sufficient.
 5. Call `generate_image` with `wait: true` for normal requests. Use `backend: openai-compatible` only when compatibility behavior is explicitly useful.

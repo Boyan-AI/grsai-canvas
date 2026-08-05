@@ -68,13 +68,14 @@ default_tools_approval_mode = "writes"
 
 ### 默认生图路由
 
-本机的配套 Skill 安装在 `~/.agents/skills/grsai-image-generation`，并通过全局 Codex 规则把未指定提供方的普通生图请求路由到 Grsai。系统内置 `imagegen` Skill 已在 `~/.codex/config.toml` 中禁用，以避免工具竞争；用户明确指定其他提供方时仍遵循用户选择。
+本机的配套 Skill 安装在 `~/.agents/skills/grsai-image-generation`，并通过全局 Codex 规则把未指定提供方的普通生图请求路由到 Grsai。常规 1K 生图默认使用 `gpt-image-2`；需要 Nano Banana 或 2K/4K 输出时应显式指定对应模型。系统内置 `imagegen` Skill 已在 `~/.codex/config.toml` 中禁用，以避免工具竞争；用户明确指定其他提供方时仍遵循用户选择。
 
 修改全局 Skill 或 `skills.config` 后必须重启 Codex。重启后可以直接说“生成一张图片”，不需要在提示词中写 Grsai。
 
 ## 使用示例
 
-- “用 nano-banana-2 生成一张 16:9 的未来城市夜景，保存到当前项目的 `generated` 目录。”
+- “生成一张 1:1 的未来城市夜景，保存到当前项目的 `generated` 目录。”
+- “用 nano-banana-2 生成一张 4K 的未来城市夜景。”
 - “以 `/absolute/path/reference.png` 为参考图，把画面改成水彩风格。”
 - “查询 Grsai 任务 `task-id` 的生成结果。”
 

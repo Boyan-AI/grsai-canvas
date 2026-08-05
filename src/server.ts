@@ -62,7 +62,7 @@ export function createServer(
         prompt: z.string().trim().min(1).max(32_000).describe("生图提示词"),
         model: z
           .enum(IMAGE_MODELS)
-          .default("nano-banana-2")
+          .default("gpt-image-2")
           .describe("Grsai 图片模型"),
         reference_images: z
           .array(z.string().min(1))
