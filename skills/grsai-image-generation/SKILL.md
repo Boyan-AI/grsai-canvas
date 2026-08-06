@@ -1,29 +1,86 @@
 ---
 name: grsai-image-generation
-description: Generate, create, draw, edit, transform, and download raster images through the Grsai MCP tools. Use by default for any image-generation or image-editing request when the user does not specify another provider, including ordinary prompts such as "generate an image", "create a picture", "画一张图", or "生成图片"; also use for local or URL reference images and existing Grsai task queries.
+description: Use when the user asks to generate, create, edit, transform, or download raster images through Grsai, including reference-image workflows or queries for an existing Grsai task, when no other provider is explicitly selected.
 ---
 
 # Grsai Image Generation
 
-Use the `grsai-image` MCP server as the default image provider whenever the user does not explicitly select another provider. Treat image generation as a potentially billable external action.
+通过 Skill 目录内置的 Python CLI 调用 Grsai 生图接口。脚本只依赖 Python 3.9+ 标准库，不依赖 Node、npm、MCP 注册或仓库外路径。
 
-## Workflow
+## 运行入口
 
-1. Confirm that the user's request itself clearly authorizes image generation. Do not ask again when the user explicitly requested generation; otherwise obtain confirmation before calling `generate_image`.
-2. Respect an explicitly requested provider or model. Otherwise use Grsai with `gpt-image-2` for routine 1K generation. Use a nano-banana model only when the user explicitly requests it or needs capabilities such as 2K or 4K output; do not silently fall back to a different image provider or invent undocumented quality, price, or latency comparisons.
-3. Pass reference images through `reference_images`. Keep them to the minimum needed. Prefer HTTPS URLs for large assets; local files and data URLs are embedded in the JSON request and share an 8 MB decoded default total limit.
-4. Pass an absolute `output_dir` when the user needs local image files. Omit it when result URLs are sufficient.
-5. Call `generate_image` with `wait: true` for normal requests. `wait_timeout_seconds` is only the polling budget after native submission returns a task ID. Use `backend: openai-compatible` only when synchronous compatibility behavior is explicitly useful.
-6. If the result remains `running`, retain the returned task ID and call `get_generation`. Do not submit a duplicate paid task merely because polling timed out.
-7. If an error has `acceptance_unknown: true`, state that the provider may already have accepted or charged the request and do not retry without explicit user authorization. Preserve the returned `request_id` for diagnostics.
-8. Return the generated image URLs and any downloaded local paths. State clearly when a task is still running or failed.
+先把 `GRSAI_SKILL_DIR` 设置为当前 Skill（即本文件所在目录）的绝对路径。所有命令都使用通用 `python3`：
 
-## Constraints
+```bash
+GRSAI_SKILL_DIR="/absolute/path/to/grsai-image-generation"
+python3 "$GRSAI_SKILL_DIR/scripts/grsai_image.py" doctor
+python3 "$GRSAI_SKILL_DIR/scripts/grsai_image.py" --help
+```
 
-- Never request, print, or persist the Grsai API key; the server reads `GRSAI_API_KEY` from its environment.
-- Do not use `get_generation` for IDs returned by `openai-compatible`; that endpoint is synchronous and its synthetic ID is local metadata.
-- Use `image_size` only for nano-banana models. For gpt-image-2, supported pixel sizes are `1024x1024`, `1536x1024`, and `1024x1536`; ratios on the native backend are best-effort and do not promise arbitrary exact output dimensions.
-- The OpenAI-compatible backend accepts only `auto` or a supported standard pixel size. Use the native backend for ratio values.
-- Do not represent an image model as a deterministic layout or animation engine. For exact sprite sheets, fixed grids, per-cell transparency, or frame counts, generate source assets and use local deterministic composition and validation.
-- Keep reference images to the minimum needed and avoid embedding large data URLs in conversation text. Reduce or compress local images before calling the tool when their decoded total exceeds 8 MB.
-- Report safety violations and provider failures without retrying the same paid generation unless the user asks.
+`doctor` 只检查 Python 版本和 `GRSAI_API_KEY` 是否配置，不发网络请求。首次使用前在宿主环境配置密钥：
+
+```bash
+export GRSAI_API_KEY="你的密钥"
+```
+
+不要把密钥写入 Skill、仓库、命令参数、提示词或日志，也不要在回复中回显密钥值。
+
+## 调用流程
+
+1. 用户明确要求生成或编辑图片时，可直接执行生成；如果请求没有明确授权付费生图，先确认。用户指定其他提供方时遵循用户选择。
+2. 常规请求使用原生后端和默认 `gpt-image-2`，默认等待 180 秒。需要 nano-banana 或 2K/4K 时显式传入 `--model` 和 `--image-size`。
+3. 需要参考图时重复传入 `--reference-image`，优先使用 HTTPS URL；本地文件或 data URL 会内联并受大小限制。
+4. 需要本地文件时传入绝对路径 `--output-dir`；否则直接返回结果 URL。
+5. 原生任务返回 `running` 且需要继续等待时使用同一个任务 ID 查询。轮询超时返回 `status: running`，之后使用 `get`，绝不重新提交同一请求。
+6. 错误含 `acceptance_unknown: true` 时，上游可能已经接收或计费；保留 `request_id`，不要自动重试，除非用户明确授权。
+
+典型命令（参数名称与 `--help` 一致）：
+
+```bash
+# 原生后端，等待完成并只返回 URL
+python3 "$GRSAI_SKILL_DIR/scripts/grsai_image.py" generate \
+  --prompt "未来城市夜景" \
+  --aspect-ratio 16:9
+
+# 提交后立即返回任务 ID
+python3 "$GRSAI_SKILL_DIR/scripts/grsai_image.py" generate \
+  --prompt "水彩风格的海边灯塔" \
+  --no-wait
+
+# 用已有任务 ID 续查，最多等待 60 秒
+python3 "$GRSAI_SKILL_DIR/scripts/grsai_image.py" get \
+  --id "task-id" \
+  --wait-timeout-seconds 60
+
+# 下载到本地（目录必须是绝对路径）
+python3 "$GRSAI_SKILL_DIR/scripts/grsai_image.py" generate \
+  --prompt "产品静物" \
+  --output-dir "/absolute/output/directory"
+```
+
+兼容后端是同步接口，仅在确有需要时使用：
+
+```bash
+python3 "$GRSAI_SKILL_DIR/scripts/grsai_image.py" generate \
+  --prompt "海边日落" \
+  --backend openai-compatible \
+  --aspect-ratio 1024x1024
+```
+
+`openai-compatible` 返回本地合成 ID，不能用 `get --id` 查询；比例值应改用原生后端。
+
+## 输出与错误
+
+- 除 `--help` 外，标准输出只包含一个 UTF-8 JSON 对象；诊断摘要写入标准错误，不输出 traceback。
+- 退出码 `0` 表示成功、仍在运行或 `doctor` 已完成；`2` 表示参数/配置错误；`3` 表示上游、生成或下载失败。
+- 成功或运行中的结果包含 `request_id`、`id`、`status`、`urls`、`files`，运行中可能包含 `progress`。
+- 失败结果包含 `status: "failed"`、`urls: []`、`files: []` 以及 `error.code`、`message`、`phase`、`backend`、`retryable`、`acceptance_unknown`；可选字段用于 HTTP 状态、上游请求 ID 和超时诊断。
+- 向用户展示结果 URL 和已下载的本地路径；明确说明任务仍在运行、内容安全拦截或失败阶段，并保留任务 ID 供续查。
+
+## 安全与边界
+
+- 只允许 HTTPS 的 Grsai 节点、参考图 URL 和结果下载 URL；测试注入的本地 mock 不代表生产配置。
+- 单张本地参考图默认最多 10 MB，内联参考图解码总量默认最多 8 MB；大图应先压缩或改用 HTTPS URL。
+- `--image-size` 只用于 nano-banana；gpt-image-2 使用 `--aspect-ratio` 的标准像素值 `1024x1024`、`1536x1024` 或 `1024x1536`。
+- 生图不是精确排版或逐帧动画引擎。Sprite sheet、固定网格和严格透明补格应由本地程序确定性合成与校验。
+- 如果宿主沙箱阻止外部网络，按宿主规则申请范围明确的网络授权，并提醒该操作可能产生费用；不要为了绕过限制切换到其他供应商。
