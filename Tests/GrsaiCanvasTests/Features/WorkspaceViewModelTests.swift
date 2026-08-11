@@ -162,4 +162,47 @@ struct WorkspaceViewModelTests {
         await model.continueEditing(task: loadedTask, source: .generated)
         #expect(model.referenceImageURLs == [generatedURL])
     }
+
+    /// 验证清空应用数据不会删除 API Key。
+    @Test("清空应用数据但保留 API Key")
+    func clearsApplicationDataKeepingCredential() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let imagesDirectory = directory.appendingPathComponent("images", isDirectory: true)
+        try FileManager.default.createDirectory(at: imagesDirectory, withIntermediateDirectories: true)
+        let imageURL = imagesDirectory.appendingPathComponent("cached.png")
+        try Data([1]).write(to: imageURL)
+
+        let suiteName = "WorkspaceViewModelTests.\(UUID().uuidString)"
+        defer { UserDefaults.standard.removePersistentDomain(forName: suiteName) }
+        let secretStore = ApplicationDataSecretStore(suiteName: suiteName)
+        try await secretStore.save("keep-this-key")
+
+        let history = GenerationHistoryStore(fileURL: directory.appendingPathComponent("history.json"))
+        let draft = GenerationDraft(
+            prompt: "待清理数据",
+            model: .gptImage2,
+            aspectRatio: .square,
+            imageSize: nil,
+            referenceImages: []
+        )
+        let response = GenerationResponse(id: "task-clear", status: .succeeded, progress: 100, results: [])
+        var task = GenerationTask.submitted(response: response, requestID: UUID(), draft: draft)
+        task.localImagePaths = [imageURL.path]
+        try await history.save([task])
+
+        let model = WorkspaceViewModel(
+            historyStore: history,
+            imageStore: ResultImageStore(directory: imagesDirectory),
+            secretStore: secretStore
+        )
+        await model.load()
+        await model.clearApplicationDataKeepingCredential()
+
+        #expect(model.tasks.isEmpty)
+        #expect(try await history.load().isEmpty)
+        #expect(!FileManager.default.fileExists(atPath: imageURL.path))
+        #expect(await secretStore.read() == "keep-this-key")
+    }
 }

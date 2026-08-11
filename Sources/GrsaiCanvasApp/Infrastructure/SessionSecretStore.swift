@@ -24,6 +24,12 @@ actor ApplicationDataSecretStore: SecretStore {
         self.storageKey = storageKey
     }
 
+    /// 使用独立 suite 创建隔离存储，避免测试跨并发域传递 UserDefaults 实例。
+    init(suiteName: String, storageKey: String = "grsai.apiKey") {
+        self.defaults = UserDefaults(suiteName: suiteName) ?? UserDefaults()
+        self.storageKey = storageKey
+    }
+
     /// 读取并校验应用数据中的令牌。
     func read() -> String? {
         guard let value = defaults.string(forKey: storageKey) else { return nil }

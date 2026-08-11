@@ -52,7 +52,7 @@ private struct GalleryView: View {
     @Bindable var model: WorkspaceViewModel
     @State private var taskPendingDeletion: GenerationTask?
     @State private var taskPendingPreview: GenerationTask?
-    private let columns = [GridItem(.adaptive(minimum: 220, maximum: 320), spacing: 16)]
+    private let columns = [GridItem(.adaptive(minimum: 160, maximum: 180), spacing: 12)]
 
     var body: some View {
         VStack(spacing: 0) {
@@ -104,7 +104,7 @@ private struct GalleryView: View {
                             }
                         }
                     }
-                    .padding(24)
+                    .padding(18)
                 }
             }
         }
@@ -144,9 +144,10 @@ private struct TaskCard: View {
     let onContinueGenerated: () -> Void
     let onPreview: () -> Void
     let onDelete: () -> Void
+    @State private var promptCopied = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 8) {
             ZStack {
                 RoundedRectangle(cornerRadius: 14)
                     .fill(Color.secondary.opacity(0.08))
@@ -155,7 +156,7 @@ private struct TaskCard: View {
             .aspectRatio(1, contentMode: .fit)
             .clipShape(RoundedRectangle(cornerRadius: 14))
 
-            HStack(spacing: 8) {
+            HStack(spacing: 6) {
                 Label(task.status.displayName, systemImage: task.status.systemImage)
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(task.status.tint)
@@ -166,11 +167,23 @@ private struct TaskCard: View {
             }
 
             Text(task.prompt)
-                .font(.callout.weight(.medium))
-                .lineLimit(2)
+                .font(.body.weight(.medium))
+                .lineSpacing(0)
+                .lineLimit(1)
+                .truncationMode(.tail)
                 .contentShape(Rectangle())
                 .onTapGesture(perform: copyPrompt)
                 .help("点击复制提示词")
+                .overlay(alignment: .topTrailing) {
+                    if promptCopied {
+                        Text("已复制")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 4)
+                            .background(.black.opacity(0.72), in: Capsule())
+                    }
+                }
 
             if task.status == .running {
                 ProgressView(value: Double(task.progress ?? 0), total: 100)
@@ -187,53 +200,73 @@ private struct TaskCard: View {
 
             if let path = task.localImagePaths.first {
                 HStack {
-                    Button("在 Finder 中显示", systemImage: "folder") {
+                    Button(action: {
                         reveal(path: path)
+                    }) {
+                        Image(systemName: "folder")
+                            .frame(width: 30, height: 30)
                     }
                     .buttonStyle(.borderless)
+                    .accessibilityLabel("在 Finder 中显示")
+                    .help("在 Finder 中显示")
                     Spacer()
-                    Button("另存为", systemImage: "square.and.arrow.down") {
+                    Button(action: {
                         saveAs(path: path)
+                    }) {
+                        Image(systemName: "square.and.arrow.down")
+                            .frame(width: 30, height: 30)
                     }
                     .buttonStyle(.borderless)
+                    .accessibilityLabel("另存为")
+                    .help("另存为")
                     continueEditingMenu
                     deleteButton
                 }
-                .font(.caption)
+                .frame(minHeight: 28)
+                .font(.body)
             } else {
                 HStack {
                     Spacer()
                     continueEditingMenu
                     deleteButton
                 }
-                .font(.caption)
+                .frame(minHeight: 28)
+                .font(.body)
             }
         }
-        .padding(14)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18))
+        .padding(10)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
         .overlay {
-            RoundedRectangle(cornerRadius: 18)
+            RoundedRectangle(cornerRadius: 16)
                 .stroke(Color.primary.opacity(0.08))
         }
     }
 
     /// 提供统一的任务删除入口，由画廊确认后执行实际删除。
     private var deleteButton: some View {
-        Button("删除", systemImage: "trash", role: .destructive, action: onDelete)
+        Button(role: .destructive, action: onDelete) {
+            Image(systemName: "trash")
+                .frame(width: 30, height: 30)
+        }
             .buttonStyle(.borderless)
             .foregroundStyle(.red)
             .accessibilityLabel("删除任务")
+            .help("删除任务")
     }
 
     /// 提供基于原图或生成图的继续编辑入口。
     private var continueEditingMenu: some View {
-        Menu("继续修改", systemImage: "pencil") {
+        Menu {
             Button("基于原图", action: onContinueOriginal)
                 .disabled(!hasAvailableOriginal)
             Button("基于生成图", action: onContinueGenerated)
                 .disabled(!hasAvailableGenerated)
+        } label: {
+            Image(systemName: "pencil")
+                .frame(width: 30, height: 30)
         }
         .menuStyle(.borderlessButton)
+        .accessibilityLabel("继续修改")
         .help("选择参考图继续修改")
     }
 
@@ -266,13 +299,7 @@ private struct TaskCard: View {
                 .resizable()
                 .scaledToFill()
         } else if let url = task.resultURLs.first {
-            AsyncImage(url: url) { phase in
-                switch phase {
-                case .success(let image): image.resizable().scaledToFill()
-                case .failure: Image(systemName: "photo.badge.exclamationmark").font(.largeTitle)
-                default: ProgressView()
-                }
-            }
+            RemoteImageView(url: url, contentMode: .fill)
         } else {
             Image(systemName: task.status.systemImage)
                 .font(.system(size: 38))
@@ -284,6 +311,11 @@ private struct TaskCard: View {
     private func copyPrompt() {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(task.prompt, forType: .string)
+        promptCopied = true
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(1.2))
+            promptCopied = false
+        }
     }
 
     /// 在 Finder 中定位已下载结果。
@@ -312,6 +344,10 @@ private struct TaskCard: View {
 private struct ImagePreviewView: View {
     let task: GenerationTask
     @Environment(\.dismiss) private var dismiss
+    @State private var scale: CGFloat = 1
+    @State private var settledScale: CGFloat = 1
+    @State private var offset: CGSize = .zero
+    @State private var settledOffset: CGSize = .zero
 
     var body: some View {
         VStack(spacing: 16) {
@@ -329,12 +365,42 @@ private struct ImagePreviewView: View {
                     .keyboardShortcut(.escape)
             }
 
-            previewContent
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(.black.opacity(0.88), in: RoundedRectangle(cornerRadius: 16))
+            ZStack {
+                previewContent
+                    .scaleEffect(scale)
+                    .offset(offset)
+                    .overlay {
+                        TrackpadGestureCapture(
+                            onPan: pan,
+                            onMagnify: magnify
+                        )
+                    }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .clipped()
+            .background(.black.opacity(0.88), in: RoundedRectangle(cornerRadius: 16))
         }
         .padding(22)
         .frame(minWidth: 720, minHeight: 560)
+    }
+
+    /// 应用鼠标拖动或双指平移产生的偏移。
+    private func pan(_ delta: CGSize) {
+        offset = CGSize(
+            width: settledOffset.width + delta.width,
+            height: settledOffset.height + delta.height
+        )
+        settledOffset = offset
+    }
+
+    /// 应用触控板缩放，并限制最大放大倍数。
+    private func magnify(_ delta: CGFloat) {
+        scale = min(max(settledScale + delta, 1), 4)
+        settledScale = scale
+        if scale == 1 {
+            offset = .zero
+            settledOffset = .zero
+        }
     }
 
     @ViewBuilder
@@ -346,19 +412,111 @@ private struct ImagePreviewView: View {
                 .scaledToFit()
                 .padding(18)
         } else if let url = task.resultURLs.first {
-            AsyncImage(url: url) { phase in
-                switch phase {
-                case .success(let image): image.resizable().scaledToFit().padding(18)
-                case .failure:
-                    Label("图片加载失败", systemImage: "photo.badge.exclamationmark")
-                        .foregroundStyle(.secondary)
-                default: ProgressView()
-                }
-            }
+            RemoteImageView(url: url, contentMode: .fit)
+                .padding(18)
         } else {
             Label("暂无可预览图片", systemImage: "photo")
                 .foregroundStyle(.secondary)
         }
+    }
+}
+
+/// 通过 macOS 触控板事件捕获双指平移、缩放和鼠标拖动。
+private struct TrackpadGestureCapture: NSViewRepresentable {
+    let onPan: (CGSize) -> Void
+    let onMagnify: (CGFloat) -> Void
+
+    func makeNSView(context: Context) -> GestureCaptureView {
+        let view = GestureCaptureView()
+        view.onPan = onPan
+        view.onMagnify = onMagnify
+        return view
+    }
+
+    func updateNSView(_ nsView: GestureCaptureView, context: Context) {
+        nsView.onPan = onPan
+        nsView.onMagnify = onMagnify
+    }
+}
+
+/// 接收 macOS 滚轮、放大和鼠标拖动事件的透明视图。
+private final class GestureCaptureView: NSView {
+    var onPan: ((CGSize) -> Void)?
+    var onMagnify: ((CGFloat) -> Void)?
+    private var lastMousePoint: NSPoint?
+
+    override func scrollWheel(with event: NSEvent) {
+        onPan?(CGSize(width: event.scrollingDeltaX, height: event.scrollingDeltaY))
+    }
+
+    override func magnify(with event: NSEvent) {
+        onMagnify?(event.magnification)
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        lastMousePoint = convert(event.locationInWindow, from: nil)
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        if let lastMousePoint {
+            onPan?(CGSize(width: point.x - lastMousePoint.x, height: point.y - lastMousePoint.y))
+        }
+        lastMousePoint = point
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        lastMousePoint = nil
+    }
+}
+
+/// 显式下载远程结果，清空缓存后仍能从任务 URL 恢复显示并支持重试。
+private struct RemoteImageView: View {
+    let url: URL
+    let contentMode: ContentMode
+    @State private var image: NSImage?
+    @State private var isLoading = true
+    @State private var failed = false
+
+    init(url: URL, contentMode: ContentMode) {
+        self.url = url
+        self.contentMode = contentMode
+    }
+
+    var body: some View {
+        Group {
+            if let image {
+                Image(nsImage: image)
+                    .resizable()
+                    .aspectRatio(contentMode: contentMode)
+            } else if failed {
+                Button("重新加载", systemImage: "arrow.clockwise") {
+                    Task { await load() }
+                }
+                .buttonStyle(.borderless)
+            } else if isLoading {
+                ProgressView()
+            }
+        }
+        .task(id: url) { await load() }
+    }
+
+    /// 从 HTTPS 结果地址重新获取图片数据。
+    private func load() async {
+        isLoading = true
+        failed = false
+        do {
+            let (data, response) = try await URLSession.shared.data(from: url)
+            guard let http = response as? HTTPURLResponse,
+                  (200..<300).contains(http.statusCode),
+                  let image = NSImage(data: data) else {
+                throw URLError(.cannotDecodeContentData)
+            }
+            self.image = image
+        } catch {
+            failed = true
+        }
+        isLoading = false
     }
 }
 

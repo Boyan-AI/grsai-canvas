@@ -4,6 +4,22 @@ import Testing
 
 @Suite("任务历史持久化")
 struct GenerationHistoryStoreTests {
+    /// 验证历史元数据可独立清除。
+    @Test("清除历史元数据文件")
+    func clearsHistoryFile() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let fileURL = directory.appendingPathComponent("history.json")
+        let store = GenerationHistoryStore(fileURL: fileURL)
+        try await store.save([])
+
+        try await store.clear()
+
+        #expect(!FileManager.default.fileExists(atPath: fileURL.path))
+        #expect(try await store.load().isEmpty)
+    }
+
     @Test("任务可原子保存并重新读取")
     func roundTripsTasks() async throws {
         let directory = FileManager.default.temporaryDirectory

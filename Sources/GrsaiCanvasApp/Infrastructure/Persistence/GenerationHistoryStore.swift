@@ -50,4 +50,14 @@ actor GenerationHistoryStore {
             throw GrsaiClientError.persistence("历史记录保存失败")
         }
     }
+
+    /// 删除历史元数据文件，供“清空应用数据”使用。
+    func clear() throws {
+        guard fileManager.fileExists(atPath: fileURL.path) else { return }
+        do {
+            try fileManager.removeItem(at: fileURL)
+        } catch {
+            throw GrsaiClientError.persistence("历史记录清理失败")
+        }
+    }
 }

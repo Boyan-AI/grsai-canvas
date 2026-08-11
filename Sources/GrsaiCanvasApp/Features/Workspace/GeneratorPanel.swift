@@ -109,28 +109,28 @@ struct GeneratorPanel: View {
 
     private var cacheSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            sectionTitle("本地缓存", detail: "不删除历史记录")
-            Text("清除原始参考图和生成结果图片，历史任务和远程链接会保留。")
+            sectionTitle("应用数据", detail: "仅保留 API Key")
+            Text("清除历史记录、原始参考图和生成结果图片，仅保留 API Key。")
                 .font(.caption)
                 .foregroundStyle(.secondary)
-            Button("清空图片缓存", systemImage: "trash", role: .destructive) {
+            Button("清空应用数据", systemImage: "trash", role: .destructive) {
                 isCacheConfirmationPresented = true
             }
             .buttonStyle(.borderless)
-            .disabled(model.isClearingCache)
+            .disabled(model.isClearingData)
         }
         .padding(14)
         .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 14))
         .confirmationDialog(
-            "清空图片缓存？",
+            "清空应用数据？",
             isPresented: $isCacheConfirmationPresented
         ) {
-            Button("清空原图和生成图", role: .destructive) {
-                Task { await model.clearImageCache() }
+            Button("清空历史和图片，仅保留 API Key", role: .destructive) {
+                Task { await model.clearApplicationDataKeepingCredential() }
             }
             Button("取消", role: .cancel) {}
         } message: {
-            Text("只删除本地图片缓存，历史记录、提示词和远程结果链接会保留。")
+            Text("历史记录、原图和生成图都会删除，API Key 会保留。此操作不可恢复。")
         }
     }
 

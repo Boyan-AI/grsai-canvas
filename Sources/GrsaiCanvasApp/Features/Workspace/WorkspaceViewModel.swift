@@ -21,7 +21,7 @@ final class WorkspaceViewModel {
     var hasCredential = false
     var isSubmitting = false
     var isFileImporterPresented = false
-    var isClearingCache = false
+    var isClearingData = false
     var alertMessage: String?
 
     private let apiClient: GrsaiAPIClient
@@ -206,14 +206,16 @@ final class WorkspaceViewModel {
         }
     }
 
-    /// 清空原始参考图和生成结果缓存，保留历史任务元数据。
-    func clearImageCache() async {
-        guard !isClearingCache else { return }
-        isClearingCache = true
-        defer { isClearingCache = false }
+    /// 清空历史和全部图片数据，只保留应用数据中的 API Key。
+    func clearApplicationDataKeepingCredential() async {
+        guard !isClearingData else { return }
+        isClearingData = true
+        defer { isClearingData = false }
         do {
+            try await historyStore.clear()
             try await imageStore.clearCache()
-            alertMessage = "图片缓存已清空，历史记录仍保留"
+            tasks = []
+            alertMessage = "应用数据已清空，API Key 已保留"
         } catch {
             present(error)
         }
