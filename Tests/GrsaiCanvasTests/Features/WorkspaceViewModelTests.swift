@@ -108,4 +108,58 @@ struct WorkspaceViewModelTests {
         #expect(try await history.load().isEmpty)
         #expect(!FileManager.default.fileExists(atPath: imageURL.path))
     }
+
+    /// 验证历史任务可以分别加载原始参考图或生成结果。
+    @Test("继续修改可选择原图或生成图")
+    func continuesEditingFromSelectedSource() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let imagesDirectory = directory.appendingPathComponent("images", isDirectory: true)
+        try FileManager.default.createDirectory(at: imagesDirectory, withIntermediateDirectories: true)
+        let originalURL = directory.appendingPathComponent("original.png")
+        let generatedURL = imagesDirectory.appendingPathComponent("generated.png")
+        try Data([1]).write(to: originalURL)
+        try Data([2]).write(to: generatedURL)
+
+        let draft = GenerationDraft(
+            prompt: "把这张图改成水彩风格",
+            model: .nanoBanana2,
+            aspectRatio: .square,
+            imageSize: .twoK,
+            referenceImages: []
+        )
+        let response = GenerationResponse(
+            id: "task-edit",
+            status: .succeeded,
+            progress: 100,
+            results: [GenerationOutput(url: URL(string: "https://example.com/generated.png")!)]
+        )
+        var task = GenerationTask.submitted(response: response, requestID: UUID(), draft: draft)
+        task.referenceImagePaths = [originalURL.path]
+        task.localImagePaths = [generatedURL.path]
+
+        let history = GenerationHistoryStore(fileURL: directory.appendingPathComponent("history.json"))
+        try await history.save([task])
+        let model = WorkspaceViewModel(
+            historyStore: history,
+            imageStore: ResultImageStore(directory: imagesDirectory),
+            secretStore: SessionSecretStore()
+        )
+        await model.load()
+        guard let loadedTask = model.tasks.first else {
+            Issue.record("历史任务未加载")
+            return
+        }
+
+        await model.continueEditing(task: loadedTask, source: .original)
+        #expect(model.prompt == task.prompt)
+        #expect(model.selectedModel == task.model)
+        #expect(model.selectedAspectRatio == task.aspectRatio)
+        #expect(model.selectedImageSize == task.imageSize)
+        #expect(model.referenceImageURLs == [originalURL])
+
+        await model.continueEditing(task: loadedTask, source: .generated)
+        #expect(model.referenceImageURLs == [generatedURL])
+    }
 }

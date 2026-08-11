@@ -79,13 +79,48 @@ actor ResultImageStore {
         }
     }
 
+    /// 将用户原始参考图复制到应用缓存，确保历史任务不依赖外部文件位置。
+    func copyReferenceImages(urls: [URL], taskID: String) throws -> [String] {
+        guard urls.count <= ReferenceImageEncoder.maximumImageCount else {
+            throw GrsaiClientError.invalidInput("参考图最多允许 8 张")
+        }
+        let referenceDirectory = directory.appendingPathComponent("References", isDirectory: true)
+        var copiedPaths: [String] = []
+        do {
+            try fileManager.createDirectory(at: referenceDirectory, withIntermediateDirectories: true)
+            for (index, url) in urls.enumerated() {
+                let accessing = url.startAccessingSecurityScopedResource()
+                defer { if accessing { url.stopAccessingSecurityScopedResource() } }
+                guard fileManager.fileExists(atPath: url.path) else {
+                    throw GrsaiClientError.persistence("原始参考图不存在")
+                }
+                let extensionName = url.pathExtension.lowercased()
+                guard ["jpg", "jpeg", "png", "webp"].contains(extensionName) else {
+                    throw GrsaiClientError.invalidInput("仅支持 JPG、JPEG、PNG 和 WEBP 参考图")
+                }
+                let destination = referenceDirectory
+                    .appendingPathComponent("\(taskID)-\(index + 1).\(extensionName)")
+                try fileManager.copyItem(at: url, to: destination)
+                copiedPaths.append(destination.path)
+            }
+            return copiedPaths
+        } catch let error as GrsaiClientError {
+            try? delete(paths: copiedPaths)
+            throw error
+        } catch {
+            try? delete(paths: copiedPaths)
+            throw GrsaiClientError.persistence("原始参考图缓存失败")
+        }
+    }
+
     /// 删除图片仓库直属的结果文件，拒绝越出应用管理目录的路径。
     func delete(paths: [String]) throws {
         let managedDirectory = directory.standardizedFileURL.resolvingSymlinksInPath()
         for path in paths {
             let candidate = URL(fileURLWithPath: path).standardizedFileURL
             let parent = candidate.deletingLastPathComponent().resolvingSymlinksInPath()
-            guard parent == managedDirectory else {
+            let parentPath = parent.path
+            guard parentPath == managedDirectory.path || parentPath.hasPrefix(managedDirectory.path + "/") else {
                 throw GrsaiClientError.persistence("任务已删除，但检测到非应用管理的图片路径")
             }
             guard fileManager.fileExists(atPath: candidate.path) else { continue }
@@ -94,6 +129,23 @@ actor ResultImageStore {
             } catch {
                 throw GrsaiClientError.persistence("任务已删除，但本地图片清理失败")
             }
+        }
+    }
+
+    /// 清空应用管理的全部图片缓存，但保留缓存目录和历史元数据。
+    func clearCache() throws {
+        guard fileManager.fileExists(atPath: directory.path) else { return }
+        do {
+            let entries = try fileManager.contentsOfDirectory(
+                at: directory,
+                includingPropertiesForKeys: nil,
+                options: [.skipsHiddenFiles]
+            )
+            for entry in entries {
+                try fileManager.removeItem(at: entry)
+            }
+        } catch {
+            throw GrsaiClientError.persistence("图片缓存清理失败")
         }
     }
 

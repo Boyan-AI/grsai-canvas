@@ -1,6 +1,12 @@
 import Foundation
 import Observation
 
+/// 历史任务继续编辑时选择的参考图来源。
+enum HistoryEditSource: Sendable {
+    case original
+    case generated
+}
+
 /// 编排工作台输入、付费提交、同任务轮询、结果下载与历史持久化。
 @MainActor
 @Observable
@@ -15,6 +21,7 @@ final class WorkspaceViewModel {
     var hasCredential = false
     var isSubmitting = false
     var isFileImporterPresented = false
+    var isClearingCache = false
     var alertMessage: String?
 
     private let apiClient: GrsaiAPIClient
@@ -118,6 +125,10 @@ final class WorkspaceViewModel {
                 referenceImages: images
             ).validated()
             let requestID = UUID()
+            let referenceImagePaths = try await imageStore.copyReferenceImages(
+                urls: urls,
+                taskID: requestID.uuidString
+            )
             let response = try await apiClient.submit(
                 draft: draft,
                 apiKey: credential,
@@ -126,7 +137,8 @@ final class WorkspaceViewModel {
             let task = GenerationTask.submitted(
                 response: response,
                 requestID: requestID,
-                draft: draft
+                draft: draft,
+                referenceImagePaths: referenceImagePaths
             )
             tasks.insert(task, at: 0)
             try await historyStore.save(tasks)
@@ -146,6 +158,67 @@ final class WorkspaceViewModel {
         referenceImageURLs = []
     }
 
+    /// 将历史任务的文字和参数恢复到工作台，并按选择加载原图或生成图。
+    func continueEditing(task: GenerationTask, source: HistoryEditSource) async {
+        prompt = task.prompt
+        selectedModel = task.model
+        selectedAspectRatio = task.aspectRatio
+        selectedImageSize = task.imageSize ?? .oneK
+        referenceImageURLs = []
+
+        switch source {
+        case .original:
+            let paths = (task.referenceImagePaths ?? []).filter {
+                FileManager.default.fileExists(atPath: $0)
+            }
+            referenceImageURLs = paths.map(URL.init(fileURLWithPath:))
+            if paths.isEmpty {
+                alertMessage = "这条历史没有可用的原始参考图，请重新选择图片"
+            }
+        case .generated:
+            let localPaths = task.localImagePaths.filter {
+                FileManager.default.fileExists(atPath: $0)
+            }
+            if !localPaths.isEmpty {
+                referenceImageURLs = localPaths
+                    .prefix(ReferenceImageEncoder.maximumImageCount)
+                    .map(URL.init(fileURLWithPath:))
+                return
+            }
+
+            do {
+                var downloadedPaths: [String] = []
+                for (index, url) in task.resultURLs.prefix(ReferenceImageEncoder.maximumImageCount).enumerated() {
+                    let path = try await imageStore.download(
+                        url: url,
+                        taskID: "\(task.id)-reference",
+                        index: index + 1
+                    )
+                    downloadedPaths.append(path)
+                }
+                referenceImageURLs = downloadedPaths.map(URL.init(fileURLWithPath:))
+                if downloadedPaths.isEmpty {
+                    alertMessage = "这条历史没有可用的生成图"
+                }
+            } catch {
+                present(error)
+            }
+        }
+    }
+
+    /// 清空原始参考图和生成结果缓存，保留历史任务元数据。
+    func clearImageCache() async {
+        guard !isClearingCache else { return }
+        isClearingCache = true
+        defer { isClearingCache = false }
+        do {
+            try await imageStore.clearCache()
+            alertMessage = "图片缓存已清空，历史记录仍保留"
+        } catch {
+            present(error)
+        }
+    }
+
     /// 删除指定任务的历史记录，并清理应用管理的本地结果图片。
     func deleteTask(id: String) async {
         guard let index = tasks.firstIndex(where: { $0.id == id }) else { return }
@@ -160,7 +233,7 @@ final class WorkspaceViewModel {
 
         pollingTaskIDs.remove(id)
         do {
-            try await imageStore.delete(paths: task.localImagePaths)
+            try await imageStore.delete(paths: task.localImagePaths + (task.referenceImagePaths ?? []))
         } catch {
             present(error)
         }

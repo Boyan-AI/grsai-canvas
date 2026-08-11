@@ -4,6 +4,28 @@ import Testing
 
 @Suite("结果图片存储")
 struct ResultImageStoreTests {
+    /// 验证原图副本进入应用缓存，清理时不影响缓存目录外的源文件。
+    @Test("复制原始参考图并可清空全部图片缓存")
+    func copiesReferencesAndClearsCache() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let source = root.appendingPathComponent("source.png")
+        let imagesDirectory = root.appendingPathComponent("images", isDirectory: true)
+        try FileManager.default.createDirectory(at: imagesDirectory, withIntermediateDirectories: true)
+        try Data([0x89, 0x50, 0x4E, 0x47]).write(to: source)
+        let store = ResultImageStore(directory: imagesDirectory)
+
+        let copied = try await store.copyReferenceImages(urls: [source], taskID: "task-copy")
+        #expect(copied.count == 1)
+        #expect(FileManager.default.fileExists(atPath: copied[0]))
+
+        try await store.clearCache()
+
+        #expect(!FileManager.default.fileExists(atPath: copied[0]))
+        #expect(FileManager.default.fileExists(atPath: source.path))
+    }
+
     /// 验证正常清理不会影响仓库外的文件。
     @Test("只删除图片仓库直属文件")
     func deletesManagedFileOnly() async throws {

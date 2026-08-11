@@ -122,6 +122,8 @@ struct GenerationTask: Codable, Identifiable, Equatable, Sendable {
     let aspectRatio: GenerationAspectRatio
     let imageSize: GenerationImageSize?
     let referenceImageNames: [String]
+    /// 为历史继续编辑保留的应用内原始参考图副本路径；旧记录缺少该字段时为空。
+    var referenceImagePaths: [String]?
     var status: GenerationStatus
     var progress: Int?
     var resultURLs: [URL]
@@ -135,6 +137,7 @@ struct GenerationTask: Codable, Identifiable, Equatable, Sendable {
         response: GenerationResponse,
         requestID: UUID,
         draft: GenerationDraft,
+        referenceImagePaths: [String] = [],
         now: Date = Date()
     ) -> GenerationTask {
         GenerationTask(
@@ -145,6 +148,7 @@ struct GenerationTask: Codable, Identifiable, Equatable, Sendable {
             aspectRatio: draft.aspectRatio,
             imageSize: draft.imageSize,
             referenceImageNames: draft.referenceImages.map(\.fileName),
+            referenceImagePaths: referenceImagePaths,
             status: response.status,
             progress: response.progress,
             resultURLs: response.results.map(\.url),

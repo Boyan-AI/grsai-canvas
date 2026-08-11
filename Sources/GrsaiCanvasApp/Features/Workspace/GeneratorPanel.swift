@@ -3,12 +3,14 @@ import SwiftUI
 /// 提供会话密钥、参考图、模型参数、提示词和付费提交入口。
 struct GeneratorPanel: View {
     @Bindable var model: WorkspaceViewModel
+    @State private var isCacheConfirmationPresented = false
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 header
                 accessSection
+                cacheSection
                 referenceImages
                 generationOptions
                 promptEditor
@@ -102,6 +104,33 @@ struct GeneratorPanel: View {
                 }
                 .scrollIndicators(.hidden)
             }
+        }
+    }
+
+    private var cacheSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            sectionTitle("本地缓存", detail: "不删除历史记录")
+            Text("清除原始参考图和生成结果图片，历史任务和远程链接会保留。")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Button("清空图片缓存", systemImage: "trash", role: .destructive) {
+                isCacheConfirmationPresented = true
+            }
+            .buttonStyle(.borderless)
+            .disabled(model.isClearingCache)
+        }
+        .padding(14)
+        .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 14))
+        .confirmationDialog(
+            "清空图片缓存？",
+            isPresented: $isCacheConfirmationPresented
+        ) {
+            Button("清空原图和生成图", role: .destructive) {
+                Task { await model.clearImageCache() }
+            }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("只删除本地图片缓存，历史记录、提示词和远程结果链接会保留。")
         }
     }
 

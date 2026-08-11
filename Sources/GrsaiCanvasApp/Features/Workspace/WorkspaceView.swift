@@ -1,5 +1,6 @@
 import SwiftUI
 import UniformTypeIdentifiers
+import AppKit
 
 /// 承载结果画廊与生成控制台的应用主界面。
 struct WorkspaceView: View {
@@ -50,6 +51,7 @@ struct WorkspaceView: View {
 private struct GalleryView: View {
     @Bindable var model: WorkspaceViewModel
     @State private var taskPendingDeletion: GenerationTask?
+    @State private var taskPendingPreview: GenerationTask?
     private let columns = [GridItem(.adaptive(minimum: 220, maximum: 320), spacing: 16)]
 
     var body: some View {
@@ -84,9 +86,20 @@ private struct GalleryView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ScrollView {
-                    LazyVGrid(columns: columns, spacing: 16) {
+                    LazyVGrid(columns: columns, alignment: .leading, spacing: 16) {
                         ForEach(model.tasks) { task in
-                            TaskCard(task: task) {
+                            TaskCard(
+                                task: task,
+                                onContinueOriginal: {
+                                    Task { await model.continueEditing(task: task, source: .original) }
+                                },
+                                onContinueGenerated: {
+                                    Task { await model.continueEditing(task: task, source: .generated) }
+                                },
+                                onPreview: {
+                                    taskPendingPreview = task
+                                }
+                            ) {
                                 taskPendingDeletion = task
                             }
                         }
@@ -110,6 +123,9 @@ private struct GalleryView: View {
         } message: { _ in
             Text("任务记录和应用数据中的结果图片将被删除，另存为的副本不受影响。")
         }
+        .sheet(item: $taskPendingPreview) { task in
+            ImagePreviewView(task: task)
+        }
     }
 
     /// 将待删除任务转换为确认弹窗的显示状态。
@@ -124,6 +140,9 @@ private struct GalleryView: View {
 /// 展示单个任务的封面、状态、提示词和本地操作。
 private struct TaskCard: View {
     let task: GenerationTask
+    let onContinueOriginal: () -> Void
+    let onContinueGenerated: () -> Void
+    let onPreview: () -> Void
     let onDelete: () -> Void
 
     var body: some View {
@@ -143,18 +162,15 @@ private struct TaskCard: View {
                 Spacer()
                 Text(task.model.rawValue)
                     .font(.caption2.monospaced())
-                    .foregroundStyle(.secondary)
-                Button(role: .destructive, action: onDelete) {
-                    Image(systemName: "trash")
-                }
-                .buttonStyle(.borderless)
-                .accessibilityLabel("删除任务")
-                .help("删除任务")
+                .foregroundStyle(.secondary)
             }
 
             Text(task.prompt)
                 .font(.callout.weight(.medium))
                 .lineLimit(2)
+                .contentShape(Rectangle())
+                .onTapGesture(perform: copyPrompt)
+                .help("点击复制提示词")
 
             if task.status == .running {
                 ProgressView(value: Double(task.progress ?? 0), total: 100)
@@ -180,6 +196,15 @@ private struct TaskCard: View {
                         saveAs(path: path)
                     }
                     .buttonStyle(.borderless)
+                    continueEditingMenu
+                    deleteButton
+                }
+                .font(.caption)
+            } else {
+                HStack {
+                    Spacer()
+                    continueEditingMenu
+                    deleteButton
                 }
                 .font(.caption)
             }
@@ -192,8 +217,49 @@ private struct TaskCard: View {
         }
     }
 
+    /// 提供统一的任务删除入口，由画廊确认后执行实际删除。
+    private var deleteButton: some View {
+        Button("删除", systemImage: "trash", role: .destructive, action: onDelete)
+            .buttonStyle(.borderless)
+            .foregroundStyle(.red)
+            .accessibilityLabel("删除任务")
+    }
+
+    /// 提供基于原图或生成图的继续编辑入口。
+    private var continueEditingMenu: some View {
+        Menu("继续修改", systemImage: "pencil") {
+            Button("基于原图", action: onContinueOriginal)
+                .disabled(!hasAvailableOriginal)
+            Button("基于生成图", action: onContinueGenerated)
+                .disabled(!hasAvailableGenerated)
+        }
+        .menuStyle(.borderlessButton)
+        .help("选择参考图继续修改")
+    }
+
+    /// 判断历史任务是否仍有可用的原始参考图缓存。
+    private var hasAvailableOriginal: Bool {
+        (task.referenceImagePaths ?? []).contains {
+            FileManager.default.fileExists(atPath: $0)
+        }
+    }
+
+    /// 判断历史任务是否有本地或远程生成结果。
+    private var hasAvailableGenerated: Bool {
+        !task.localImagePaths.isEmpty || !task.resultURLs.isEmpty
+    }
+
     @ViewBuilder
     private var artwork: some View {
+        Button(action: onPreview) {
+            artworkContent
+        }
+        .buttonStyle(.plain)
+        .disabled(!hasAvailableGenerated)
+    }
+
+    @ViewBuilder
+    private var artworkContent: some View {
         if let path = task.localImagePaths.first,
            let image = NSImage(contentsOfFile: path) {
             Image(nsImage: image)
@@ -214,6 +280,12 @@ private struct TaskCard: View {
         }
     }
 
+    /// 将完整提示词写入 macOS 系统剪贴板。
+    private func copyPrompt() {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(task.prompt, forType: .string)
+    }
+
     /// 在 Finder 中定位已下载结果。
     private func reveal(path: String) {
         NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
@@ -232,6 +304,60 @@ private struct TaskCard: View {
             try FileManager.default.copyItem(at: source, to: destination)
         } catch {
             NSAlert(error: error).runModal()
+        }
+    }
+}
+
+/// 在独立弹窗中展示历史任务的第一张结果图片。
+private struct ImagePreviewView: View {
+    let task: GenerationTask
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(spacing: 16) {
+            HStack {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("作品预览")
+                        .font(.title2.bold())
+                    Text(task.prompt)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+                Spacer()
+                Button("关闭") { dismiss() }
+                    .keyboardShortcut(.escape)
+            }
+
+            previewContent
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(.black.opacity(0.88), in: RoundedRectangle(cornerRadius: 16))
+        }
+        .padding(22)
+        .frame(minWidth: 720, minHeight: 560)
+    }
+
+    @ViewBuilder
+    private var previewContent: some View {
+        if let path = task.localImagePaths.first,
+           let image = NSImage(contentsOfFile: path) {
+            Image(nsImage: image)
+                .resizable()
+                .scaledToFit()
+                .padding(18)
+        } else if let url = task.resultURLs.first {
+            AsyncImage(url: url) { phase in
+                switch phase {
+                case .success(let image): image.resizable().scaledToFit().padding(18)
+                case .failure:
+                    Label("图片加载失败", systemImage: "photo.badge.exclamationmark")
+                        .foregroundStyle(.secondary)
+                default: ProgressView()
+                }
+            }
+        } else {
+            Label("暂无可预览图片", systemImage: "photo")
+                .foregroundStyle(.secondary)
         }
     }
 }
