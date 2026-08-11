@@ -21,7 +21,7 @@ struct GeneratorPanel: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Label("Grsai Canvas", systemImage: "sparkles.rectangle.stack")
+            Label("画境", systemImage: "sparkles.rectangle.stack")
                 .font(.title2.bold())
             Text("原生 macOS 生图工作台")
                 .font(.callout)

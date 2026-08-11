@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Grsai Canvas 的 macOS 应用入口。
+/// 画境的 macOS 应用入口。
 @main
 struct GrsaiCanvasApp: App {
     @State private var model = WorkspaceViewModel()

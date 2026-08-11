@@ -3,7 +3,8 @@
 set -euo pipefail
 
 SCRIPT_DIRECTORY="$(cd -- "$(dirname -- "$0")" && pwd)"
-PRODUCT_NAME="Grsai Canvas"
+PRODUCT_NAME="画境"
+LEGACY_PRODUCT_NAME="Grsai Canvas"
 SOURCE_APP="${SCRIPT_DIRECTORY}/.build/app/${PRODUCT_NAME}.app"
 
 if [[ -n "${GRSAI_INSTALL_DIRECTORY:-}" ]]; then
@@ -28,7 +29,7 @@ fi
 
 STAGING_DIRECTORY="$(/usr/bin/mktemp -d "${INSTALL_DIRECTORY}/.grsai-canvas-install.XXXXXX")"
 TARGET_APP="${INSTALL_DIRECTORY}/${PRODUCT_NAME}.app"
-BACKUP_APP=""
+LEGACY_TARGET_APP="${INSTALL_DIRECTORY}/${LEGACY_PRODUCT_NAME}.app"
 
 # 只清理本次 mktemp 创建的受控暂存目录。
 cleanup() {
@@ -42,26 +43,19 @@ trap cleanup EXIT INT TERM
 STAGED_APP="${STAGING_DIRECTORY}/${PRODUCT_NAME}.app"
 /usr/bin/ditto "${SOURCE_APP}" "${STAGED_APP}"
 
-if [[ -e "${TARGET_APP}" || -L "${TARGET_APP}" ]]; then
-    TIMESTAMP="$(/bin/date '+%Y%m%d-%H%M%S')"
-    BACKUP_APP="${INSTALL_DIRECTORY}/${PRODUCT_NAME}.backup-${TIMESTAMP}.app"
-    BACKUP_INDEX=1
-    while [[ -e "${BACKUP_APP}" || -L "${BACKUP_APP}" ]]; do
-        BACKUP_APP="${INSTALL_DIRECTORY}/${PRODUCT_NAME}.backup-${TIMESTAMP}-${BACKUP_INDEX}.app"
-        (( BACKUP_INDEX += 1 ))
-    done
-    /bin/mv "${TARGET_APP}" "${BACKUP_APP}"
-fi
+# 关闭旧版本并清理中英文同名应用，确保桌面只保留当前版本。
+/usr/bin/osascript -e 'tell application id "ai.grsai.canvas" to quit' 2>/dev/null || true
+for APP_PATH in "${TARGET_APP}" "${LEGACY_TARGET_APP}"; do
+    if [[ -e "${APP_PATH}" || -L "${APP_PATH}" ]]; then
+        /bin/rm -rf -- "${APP_PATH}"
+    fi
+done
 
 if ! /bin/mv "${STAGED_APP}" "${TARGET_APP}"; then
-    if [[ -n "${BACKUP_APP}" && ! -e "${TARGET_APP}" ]]; then
-        /bin/mv "${BACKUP_APP}" "${TARGET_APP}"
-    fi
-    echo "安装失败，已尝试恢复原版本。" >&2
+    echo "安装失败。" >&2
     exit 4
 fi
 
 echo "安装完成：${TARGET_APP}"
-if [[ -n "${BACKUP_APP}" ]]; then
-    echo "旧版本已备份：${BACKUP_APP}"
-fi
+/usr/bin/open -na "${TARGET_APP}"
+echo "已启动：${TARGET_APP}"

@@ -1,6 +1,6 @@
-# Grsai Canvas
+# 画境
 
-原生 macOS 生图客户端与面向 Codex 的可迁移 Grsai 生图 Skill。macOS 客户端参考 `image.grsai.ai` 的双栏工作台，提供本地历史画廊、参考图、模型参数、异步任务恢复和结果保存；Python CLI 继续用于自动化与 Skill 调用。
+原生 macOS 生图客户端与面向 Codex 的可迁移 Grsai 生图 Skill。画境参考 `image.grsai.ai` 的双栏工作台，提供本地历史画廊、参考图、模型参数、异步任务恢复和结果保存；Python CLI 继续用于自动化与 Skill 调用。
 
 ## macOS 客户端
 
@@ -12,13 +12,13 @@
 ./install.sh
 ```
 
-安装结果为桌面上的 `Grsai Canvas.app`。如果桌面已经存在同名 App，脚本会先将旧版本改名为 `Grsai Canvas.backup-YYYYMMDD-HHMMSS.app`，不会静默删除。安装完成后不会自动启动应用。
+安装结果为桌面上的 `画境.app`。如果桌面存在旧的 `Grsai Canvas.app` 或同名 App，脚本会关闭并直接覆盖，安装完成后自动启动新版本。
 
 构建可直接启动的本地 App：
 
 ```bash
 scripts/build-app.sh
-open ".build/app/Grsai Canvas.app"
+open ".build/app/画境.app"
 ```
 
 调试构建可传入 `debug`：
@@ -38,7 +38,7 @@ scripts/build-app.sh debug
 
 ### 密钥与费用边界
 
-当前 MVP 的 API Key 只保存在应用进程内，关闭应用后自动清除；不会写入仓库、UserDefaults、历史文件或日志。每次重新启动后需要再次输入。原计划使用 Keychain，但当前开发环境的敏感文件防护禁止写入系统钥匙串实现，因此没有用明文持久化替代。
+当前 MVP 的 API Key 保存在应用自身的 UserDefaults 数据区，关闭应用后仍可读取；不会写入仓库、历史文件或日志。用户可在设置中主动清除。按产品取舍，这不是钥匙串加密存储，同一 macOS 用户可以读取本机应用数据。
 
 点击“生成图像 · 可能产生费用”会提交真实 Grsai 任务。普通构建、启动和自动化测试不会访问 Grsai，也不会产生生图费用。提交超时且上游接收状态未知时，客户端会明确提示，不会自动重复提交；拿到任务 ID 后的轮询不会创建新任务。
 
