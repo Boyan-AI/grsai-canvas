@@ -18,7 +18,7 @@ struct GeneratorPanel: View {
             }
             .padding(24)
         }
-        .background(.regularMaterial)
+        .background(WorkspaceTheme.surface)
     }
 
     private var header: some View {
@@ -27,7 +27,7 @@ struct GeneratorPanel: View {
                 .font(.title2.bold())
             Text("原生 macOS 生图工作台")
                 .font(.callout)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(WorkspaceTheme.silverMist)
         }
     }
 
@@ -37,7 +37,7 @@ struct GeneratorPanel: View {
             if model.hasCredential {
                 HStack {
                     Label("密钥保存在本机应用数据中", systemImage: "checkmark.shield.fill")
-                        .foregroundStyle(.green)
+                        .foregroundStyle(WorkspaceTheme.deepVerdant)
                     Spacer()
                     Button("清除") {
                         Task { await model.clearCredential() }
@@ -53,6 +53,7 @@ struct GeneratorPanel: View {
                         Task { await model.saveCredential() }
                     }
                     .buttonStyle(.bordered)
+                    .tint(WorkspaceTheme.electricIris)
                     .disabled(model.credentialInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
                 Link("获取 API Key", destination: URL(string: "https://grsai.com")!)
@@ -60,7 +61,7 @@ struct GeneratorPanel: View {
             }
         }
         .padding(14)
-        .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 14))
+        .background(WorkspaceTheme.raisedSurface, in: RoundedRectangle(cornerRadius: 14))
     }
 
     private var referenceImages: some View {
@@ -76,16 +77,16 @@ struct GeneratorPanel: View {
                         .fontWeight(.medium)
                     Text("JPG、PNG、WEBP · 总计不超过 8 MB")
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(WorkspaceTheme.silverMist)
                 }
                 .frame(maxWidth: .infinity, minHeight: 110)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .background(Color.accentColor.opacity(0.06), in: RoundedRectangle(cornerRadius: 14))
+            .background(WorkspaceTheme.electricIris.opacity(0.10), in: RoundedRectangle(cornerRadius: 14))
             .overlay {
                 RoundedRectangle(cornerRadius: 14)
-                    .stroke(Color.accentColor.opacity(0.35), style: StrokeStyle(lineWidth: 1.5, dash: [7]))
+                    .stroke(WorkspaceTheme.electricIris.opacity(0.65), style: StrokeStyle(lineWidth: 1.5, dash: [7]))
             }
             .dropDestination(for: URL.self) { urls, _ in
                 model.addReferenceImages(urls)
@@ -112,7 +113,7 @@ struct GeneratorPanel: View {
             sectionTitle("应用数据", detail: "仅保留 API Key")
             Text("清除历史记录、原始参考图和生成结果图片，仅保留 API Key。")
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(WorkspaceTheme.silverMist)
             Button("清空应用数据", systemImage: "trash", role: .destructive) {
                 isCacheConfirmationPresented = true
             }
@@ -120,7 +121,7 @@ struct GeneratorPanel: View {
             .disabled(model.isClearingData)
         }
         .padding(14)
-        .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 14))
+        .background(WorkspaceTheme.raisedSurface, in: RoundedRectangle(cornerRadius: 14))
         .confirmationDialog(
             "清空应用数据？",
             isPresented: $isCacheConfirmationPresented
@@ -160,7 +161,7 @@ struct GeneratorPanel: View {
                 .pickerStyle(.segmented)
             } else {
                 LabeledContent("输出规格", value: "由比例决定 · 1K")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(WorkspaceTheme.silverMist)
             }
         }
     }
@@ -173,11 +174,11 @@ struct GeneratorPanel: View {
                 .scrollContentBackground(.hidden)
                 .padding(10)
                 .frame(minHeight: 130)
-                .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 12))
+                .background(WorkspaceTheme.raisedSurface, in: RoundedRectangle(cornerRadius: 12))
                 .overlay(alignment: .topLeading) {
                     if model.prompt.isEmpty {
                         Text("例如：一只金毛幼犬坐在午后的草地上，自然摄影风格……")
-                            .foregroundStyle(.tertiary)
+                            .foregroundStyle(WorkspaceTheme.ashGray)
                             .padding(16)
                             .allowsHitTesting(false)
                     }
@@ -198,12 +199,13 @@ struct GeneratorPanel: View {
                 .frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
+            .tint(WorkspaceTheme.electricIris)
             .controlSize(.large)
             .disabled(!model.canGenerate)
 
             HStack {
                 Text(model.hasCredential ? "点击生成即提交付费任务" : "请先设置 API Key")
-                    .foregroundStyle(model.hasCredential ? Color.secondary : Color.orange)
+                    .foregroundStyle(model.hasCredential ? WorkspaceTheme.silverMist : WorkspaceTheme.saffronSpark)
                 Spacer()
                 Button("清空") { model.resetDraft() }
                     .buttonStyle(.borderless)
@@ -218,7 +220,7 @@ struct GeneratorPanel: View {
             Text(title).font(.headline)
             Spacer()
             if let detail {
-                Text(detail).font(.caption).foregroundStyle(.secondary)
+                Text(detail).font(.caption).foregroundStyle(WorkspaceTheme.ashGray)
             }
         }
     }
@@ -238,7 +240,7 @@ private struct ReferenceThumbnail: View {
                         .scaledToFill()
                 } else {
                     Image(systemName: "photo")
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(WorkspaceTheme.silverMist)
                 }
             }
             .frame(width: 72, height: 72)

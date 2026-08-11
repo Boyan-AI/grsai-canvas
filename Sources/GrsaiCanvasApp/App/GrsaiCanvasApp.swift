@@ -9,6 +9,7 @@ struct GrsaiCanvasApp: App {
         WindowGroup {
             WorkspaceView(model: model)
                 .frame(minWidth: 980, minHeight: 640)
+                .preferredColorScheme(.dark)
         }
         .windowStyle(.hiddenTitleBar)
         .windowResizability(.contentMinSize)

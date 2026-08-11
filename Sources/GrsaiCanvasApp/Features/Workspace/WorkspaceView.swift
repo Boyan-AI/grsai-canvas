@@ -14,13 +14,7 @@ struct WorkspaceView: View {
             GeneratorPanel(model: model)
                 .frame(minWidth: 360, idealWidth: 420, maxWidth: 480, maxHeight: .infinity)
         }
-        .background {
-            LinearGradient(
-                colors: [Color.accentColor.opacity(0.08), Color.clear],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-        }
+        .background(WorkspaceTheme.void)
         .task { await model.load() }
         .fileImporter(
             isPresented: $model.isFileImporterPresented,
@@ -62,7 +56,7 @@ private struct GalleryView: View {
                         .font(.title2.bold())
                     Text("任务保存在本机，可在重启后继续查询。")
                         .font(.callout)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(WorkspaceTheme.silverMist)
                 }
                 Spacer()
                 if !model.tasks.isEmpty {
@@ -70,7 +64,7 @@ private struct GalleryView: View {
                         .font(.caption.weight(.medium))
                         .padding(.horizontal, 10)
                         .padding(.vertical, 6)
-                        .background(.quaternary, in: Capsule())
+                        .background(WorkspaceTheme.raisedSurface, in: Capsule())
                 }
             }
             .padding(24)
@@ -150,7 +144,7 @@ private struct TaskCard: View {
         VStack(alignment: .leading, spacing: 8) {
             ZStack {
                 RoundedRectangle(cornerRadius: 14)
-                    .fill(Color.secondary.opacity(0.08))
+                    .fill(WorkspaceTheme.raisedSurface)
                 artwork
             }
             .aspectRatio(1, contentMode: .fit)
@@ -163,7 +157,7 @@ private struct TaskCard: View {
                 Spacer()
                 Text(task.model.rawValue)
                     .font(.caption2.monospaced())
-                .foregroundStyle(.secondary)
+                .foregroundStyle(WorkspaceTheme.ashGray)
             }
 
             Text(task.prompt)
@@ -181,7 +175,7 @@ private struct TaskCard: View {
                             .foregroundStyle(.white)
                             .padding(.horizontal, 7)
                             .padding(.vertical, 4)
-                            .background(.black.opacity(0.72), in: Capsule())
+                            .background(WorkspaceTheme.electricIris, in: Capsule())
                     }
                 }
 
@@ -194,7 +188,7 @@ private struct TaskCard: View {
             if let errorMessage = task.errorMessage {
                 Text(errorMessage)
                     .font(.caption)
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(WorkspaceTheme.saffronSpark)
                     .lineLimit(3)
             }
 
@@ -235,10 +229,10 @@ private struct TaskCard: View {
             }
         }
         .padding(10)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+        .background(WorkspaceTheme.surface, in: RoundedRectangle(cornerRadius: 16))
         .overlay {
             RoundedRectangle(cornerRadius: 16)
-                .stroke(Color.primary.opacity(0.08))
+                .stroke(WorkspaceTheme.subtleBorder)
         }
     }
 
@@ -249,7 +243,7 @@ private struct TaskCard: View {
                 .frame(width: 30, height: 30)
         }
             .buttonStyle(.borderless)
-            .foregroundStyle(.red)
+            .foregroundStyle(WorkspaceTheme.saffronSpark)
             .accessibilityLabel("删除任务")
             .help("删除任务")
     }
@@ -357,7 +351,7 @@ private struct ImagePreviewView: View {
                         .font(.title2.bold())
                     Text(task.prompt)
                         .font(.callout)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(WorkspaceTheme.silverMist)
                         .lineLimit(2)
                 }
                 Spacer()
@@ -378,7 +372,7 @@ private struct ImagePreviewView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .clipped()
-            .background(.black.opacity(0.88), in: RoundedRectangle(cornerRadius: 16))
+            .background(WorkspaceTheme.void, in: RoundedRectangle(cornerRadius: 16))
         }
         .padding(22)
         .frame(minWidth: 720, minHeight: 560)
@@ -416,7 +410,7 @@ private struct ImagePreviewView: View {
                 .padding(18)
         } else {
             Label("暂无可预览图片", systemImage: "photo")
-                .foregroundStyle(.secondary)
+                .foregroundStyle(WorkspaceTheme.ashGray)
         }
     }
 }
@@ -542,10 +536,10 @@ private extension GenerationStatus {
 
     var tint: Color {
         switch self {
-        case .running: .blue
-        case .violation: .orange
-        case .succeeded: .green
-        case .failed: .red
+        case .running: WorkspaceTheme.electricIris
+        case .violation: WorkspaceTheme.saffronSpark
+        case .succeeded: WorkspaceTheme.deepVerdant
+        case .failed: WorkspaceTheme.saffronSpark
         }
     }
 }
