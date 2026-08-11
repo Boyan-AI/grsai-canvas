@@ -18,6 +18,7 @@ struct GeneratorPanel: View {
             }
             .padding(24)
         }
+        .scrollIndicators(.hidden)
         .background(WorkspaceTheme.surface)
     }
 

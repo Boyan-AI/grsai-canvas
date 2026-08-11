@@ -103,6 +103,7 @@ private struct GalleryView: View {
                         }
                         .padding(18)
                     }
+                    .scrollIndicators(.hidden)
                 }
             }
         }
