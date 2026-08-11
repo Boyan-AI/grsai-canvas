@@ -49,56 +49,60 @@ private struct GalleryView: View {
     private let columns = [GridItem(.adaptive(minimum: 160, maximum: 180), spacing: 12)]
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("作品画廊")
-                        .font(.title2.bold())
-                    Text("任务保存在本机，可在重启后继续查询。")
-                        .font(.callout)
-                        .foregroundStyle(WorkspaceTheme.silverMist)
-                }
-                Spacer()
-                if !model.tasks.isEmpty {
-                    Text("\(model.tasks.count) 个任务")
-                        .font(.caption.weight(.medium))
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .background(WorkspaceTheme.raisedSurface, in: Capsule())
-                }
-            }
-            .padding(24)
+        ZStack {
+            galleryBackdrop
 
-            Divider()
+            VStack(spacing: 0) {
+                HStack {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("作品画廊")
+                            .font(.title2.bold())
+                        Text("任务保存在本机，可在重启后继续查询。")
+                            .font(.callout)
+                            .foregroundStyle(WorkspaceTheme.silverMist)
+                    }
+                    Spacer()
+                    if !model.tasks.isEmpty {
+                        Text("\(model.tasks.count) 个任务")
+                            .font(.caption.weight(.medium))
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(WorkspaceTheme.raisedSurface, in: Capsule())
+                    }
+                }
+                .padding(24)
 
-            if model.tasks.isEmpty {
-                ContentUnavailableView(
-                    "还没有作品",
-                    systemImage: "photo.on.rectangle.angled",
-                    description: Text("在右侧输入提示词，生成结果会显示在这里。")
-                )
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                ScrollView {
-                    LazyVGrid(columns: columns, alignment: .leading, spacing: 16) {
-                        ForEach(model.tasks) { task in
-                            TaskCard(
-                                task: task,
-                                onContinueOriginal: {
-                                    Task { await model.continueEditing(task: task, source: .original) }
-                                },
-                                onContinueGenerated: {
-                                    Task { await model.continueEditing(task: task, source: .generated) }
-                                },
-                                onPreview: {
-                                    taskPendingPreview = task
+                Divider()
+
+                if model.tasks.isEmpty {
+                    ContentUnavailableView(
+                        "还没有作品",
+                        systemImage: "photo.on.rectangle.angled",
+                        description: Text("在右侧输入提示词，生成结果会显示在这里。")
+                    )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    ScrollView {
+                        LazyVGrid(columns: columns, alignment: .leading, spacing: 16) {
+                            ForEach(model.tasks) { task in
+                                TaskCard(
+                                    task: task,
+                                    onContinueOriginal: {
+                                        Task { await model.continueEditing(task: task, source: .original) }
+                                    },
+                                    onContinueGenerated: {
+                                        Task { await model.continueEditing(task: task, source: .generated) }
+                                    },
+                                    onPreview: {
+                                        taskPendingPreview = task
+                                    }
+                                ) {
+                                    taskPendingDeletion = task
                                 }
-                            ) {
-                                taskPendingDeletion = task
                             }
                         }
+                        .padding(18)
                     }
-                    .padding(18)
                 }
             }
         }
@@ -120,6 +124,40 @@ private struct GalleryView: View {
         .sheet(item: $taskPendingPreview) { task in
             ImagePreviewView(task: task)
         }
+    }
+
+    /// 绘制低对比度的太阳、云朵、远山和草地，为作品卡片提供手绘动漫氛围。
+    private var galleryBackdrop: some View {
+        GeometryReader { proxy in
+            ZStack {
+                WorkspaceTheme.void
+
+                Circle()
+                    .fill(WorkspaceTheme.saffronSpark.opacity(0.22))
+                    .frame(width: 170, height: 170)
+                    .position(x: proxy.size.width * 0.82, y: 110)
+
+                HStack(spacing: 12) {
+                    Capsule().frame(width: 86, height: 26)
+                    Capsule().frame(width: 54, height: 34)
+                    Capsule().frame(width: 72, height: 22)
+                }
+                .foregroundStyle(WorkspaceTheme.boneWhite.opacity(0.64))
+                .blur(radius: 1)
+                .position(x: proxy.size.width * 0.28, y: 118)
+
+                Ellipse()
+                    .fill(WorkspaceTheme.deepVerdant.opacity(0.16))
+                    .frame(width: proxy.size.width * 1.35, height: 190)
+                    .position(x: proxy.size.width * 0.28, y: proxy.size.height - 30)
+
+                Ellipse()
+                    .fill(WorkspaceTheme.electricIris.opacity(0.12))
+                    .frame(width: proxy.size.width * 1.2, height: 150)
+                    .position(x: proxy.size.width * 0.84, y: proxy.size.height - 8)
+            }
+        }
+        .allowsHitTesting(false)
     }
 
     /// 将待删除任务转换为确认弹窗的显示状态。
