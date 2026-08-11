@@ -13,9 +13,9 @@ CONTENTS_DIRECTORY="${APP_DIRECTORY}/Contents"
 MACOS_DIRECTORY="${CONTENTS_DIRECTORY}/MacOS"
 
 cd "${PROJECT_DIRECTORY}"
-rtk swift build -c "${CONFIGURATION}" --product GrsaiCanvasApp
+/usr/bin/xcrun swift build -c "${CONFIGURATION}" --product GrsaiCanvasApp
 
-EXECUTABLE_PATH="$(rtk swift build -c "${CONFIGURATION}" --show-bin-path)/GrsaiCanvasApp"
+EXECUTABLE_PATH="$(/usr/bin/xcrun swift build -c "${CONFIGURATION}" --show-bin-path)/GrsaiCanvasApp"
 
 mkdir -p "${MACOS_DIRECTORY}"
 cp "${EXECUTABLE_PATH}" "${MACOS_DIRECTORY}/GrsaiCanvasApp"

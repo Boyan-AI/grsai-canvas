@@ -6,6 +6,14 @@
 
 运行环境：macOS 14 或更高版本、Swift 6.1 或更高版本。客户端只使用 SwiftUI、Foundation 和系统框架，不依赖第三方包，也不会嵌入 Python 运行时。
 
+一键构建并安装到当前用户桌面：
+
+```bash
+./install.sh
+```
+
+安装结果为桌面上的 `Grsai Canvas.app`。如果桌面已经存在同名 App，脚本会先将旧版本改名为 `Grsai Canvas.backup-YYYYMMDD-HHMMSS.app`，不会静默删除。安装完成后不会自动启动应用。
+
 构建可直接启动的本地 App：
 
 ```bash
