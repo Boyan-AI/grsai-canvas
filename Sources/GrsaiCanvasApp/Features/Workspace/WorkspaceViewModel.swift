@@ -30,7 +30,7 @@ final class WorkspaceViewModel {
         apiClient: GrsaiAPIClient = GrsaiAPIClient(),
         historyStore: GenerationHistoryStore = GenerationHistoryStore(),
         imageStore: ResultImageStore = ResultImageStore(),
-        secretStore: any SecretStore = SessionSecretStore(),
+        secretStore: any SecretStore = ApplicationDataSecretStore(),
         pollInterval: Duration = .seconds(2),
         retryInterval: Duration = .seconds(5)
     ) {
@@ -49,7 +49,7 @@ final class WorkspaceViewModel {
             && !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
-    /// 加载历史和会话凭据，并恢复同一任务 ID 的查询。
+    /// 加载历史和持久化凭据，并恢复同一任务 ID 的查询。
     func load() async {
         do {
             tasks = try await historyStore.load().sorted { $0.createdAt > $1.createdAt }
@@ -60,7 +60,7 @@ final class WorkspaceViewModel {
         }
     }
 
-    /// 保存当前会话凭据，不写入文件或 UserDefaults。
+    /// 将当前凭据保存到本机应用数据中。
     func saveCredential() async {
         do {
             try await secretStore.save(credentialInput)
@@ -72,7 +72,7 @@ final class WorkspaceViewModel {
         }
     }
 
-    /// 清除当前会话凭据并停止新提交。
+    /// 清除本机应用数据中的凭据并停止新提交。
     func clearCredential() async {
         await secretStore.delete()
         credentialInput = ""

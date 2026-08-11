@@ -31,10 +31,10 @@ struct GeneratorPanel: View {
 
     private var accessSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            sectionTitle("API Key", detail: model.hasCredential ? "当前会话已设置" : "关闭应用后清除")
+            sectionTitle("API Key", detail: model.hasCredential ? "已保存到本机" : "关闭应用后仍保留")
             if model.hasCredential {
                 HStack {
-                    Label("密钥仅保存在内存中", systemImage: "checkmark.shield.fill")
+                    Label("密钥保存在本机应用数据中", systemImage: "checkmark.shield.fill")
                         .foregroundStyle(.green)
                     Spacer()
                     Button("清除") {
