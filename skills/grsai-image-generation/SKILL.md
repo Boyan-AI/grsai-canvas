@@ -27,24 +27,22 @@ export GRSAI_API_KEY="你的密钥"
 
 ## 调用流程
 
-1. 用户明确要求生成或编辑图片时，可直接执行生成；如果请求没有明确授权付费生图，先确认。用户指定其他提供方时遵循用户选择。
-2. 常规请求使用原生后端和默认 `gpt-image-2`，默认等待 180 秒。需要 nano-banana 或 2K/4K 时显式传入 `--model` 和 `--image-size`。
-3. 需要参考图时重复传入 `--reference-image`，优先使用 HTTPS URL；本地文件或 data URL 会内联并受大小限制。
-4. 需要本地文件时传入绝对路径 `--output-dir`；否则直接返回结果 URL。
-5. 原生任务返回 `running` 且需要继续等待时使用同一个任务 ID 查询。轮询超时返回 `status: running`，之后使用 `get`，绝不重新提交同一请求。
-6. 错误含 `acceptance_unknown: true` 时，上游可能已经接收或计费；保留 `request_id`，不要自动重试，除非用户明确授权。
+1. 先运行 `doctor`，只检查 Python 和密钥配置，不发网络请求。
+2. 首次付费提交前获得用户明确授权。若宿主已知限制外网，同时申请范围明确的 Grsai 网络权限，不要先在已知无网环境提交付费任务。用户指定其他提供方时遵循用户选择。
+3. 常规请求使用原生后端和默认 `gpt-image-2`。优先用 `generate --no-wait` 提交并立即保存 `id` 和 `request_id`，再用 `get` 等待；这样即使长等待或输出中断，仍可恢复同一任务。CLI 的等待默认值是 180 秒，但不应作为可恢复流程的默认选择。
+4. 保持提交命令的 JSON 输出可观测。宿主提供 raw/proxy 模式时优先使用；创建输出目录、提交、查询和下载分开执行，不要把它们串成一条复合 shell 命令，以免丢失任务 ID 或失败阶段。
+5. 需要 nano-banana 或 2K/4K 时显式传入 `--model` 和 `--image-size`。需要参考图时重复传入 `--reference-image`，优先使用 HTTPS URL；本地文件或 data URL 会内联并受大小限制。
+6. 原生任务返回 `running` 时，只用同一个任务 ID 调用 `get`。轮询超时返回 `status: running` 是正常状态；轮询不会新建生图任务，不要因进度低或等待超时重新提交。
+7. 任务成功后展示 HTTPS 结果 URL。若采用 `--no-wait` 且需要本地文件，先单独创建输出目录，再下载 `get` 返回的 URL 并校验文件类型和尺寸。只有在网络与输出捕获都可靠时，才用 `generate --output-dir` 的同步下载流程。
+8. 错误含 `acceptance_unknown: true` 时，上游可能已经接收或计费；保留 `request_id`，停止自动重试，明确告知重试可能产生重复费用，并重新获得用户授权。若需确认是否计费，查看 Grsai 后台任务或账单，不要从客户端错误臆测。
 
 典型命令（参数名称与 `--help` 一致）：
 
 ```bash
-# 原生后端，等待完成并只返回 URL
-python3 "$GRSAI_SKILL_DIR/scripts/grsai_image.py" generate \
-  --prompt "未来城市夜景" \
-  --aspect-ratio 16:9
-
-# 提交后立即返回任务 ID
+# 原生后端：提交后立即返回任务 ID（推荐）
 python3 "$GRSAI_SKILL_DIR/scripts/grsai_image.py" generate \
   --prompt "水彩风格的海边灯塔" \
+  --aspect-ratio 16:9 \
   --no-wait
 
 # 用已有任务 ID 续查，最多等待 60 秒
@@ -52,7 +50,7 @@ python3 "$GRSAI_SKILL_DIR/scripts/grsai_image.py" get \
   --id "task-id" \
   --wait-timeout-seconds 60
 
-# 下载到本地（目录必须是绝对路径）
+# 同步等待并下载到本地（仅用于网络和输出捕获可靠的环境）
 python3 "$GRSAI_SKILL_DIR/scripts/grsai_image.py" generate \
   --prompt "产品静物" \
   --output-dir "/absolute/output/directory"
