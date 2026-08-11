@@ -146,6 +146,26 @@ final class WorkspaceViewModel {
         referenceImageURLs = []
     }
 
+    /// 删除指定任务的历史记录，并清理应用管理的本地结果图片。
+    func deleteTask(id: String) async {
+        guard let index = tasks.firstIndex(where: { $0.id == id }) else { return }
+        let task = tasks.remove(at: index)
+        do {
+            try await historyStore.save(tasks)
+        } catch {
+            tasks.insert(task, at: index)
+            present(error)
+            return
+        }
+
+        pollingTaskIDs.remove(id)
+        do {
+            try await imageStore.delete(paths: task.localImagePaths)
+        } catch {
+            present(error)
+        }
+    }
+
     /// 为所有未完成任务恢复轮询，不重新提交生成请求。
     private func resumePendingTasks() {
         guard hasCredential else { return }

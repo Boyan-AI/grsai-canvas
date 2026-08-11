@@ -49,6 +49,7 @@ struct WorkspaceView: View {
 /// 显示历史任务和已下载结果的响应式画廊。
 private struct GalleryView: View {
     @Bindable var model: WorkspaceViewModel
+    @State private var taskPendingDeletion: GenerationTask?
     private let columns = [GridItem(.adaptive(minimum: 220, maximum: 320), spacing: 16)]
 
     var body: some View {
@@ -85,19 +86,45 @@ private struct GalleryView: View {
                 ScrollView {
                     LazyVGrid(columns: columns, spacing: 16) {
                         ForEach(model.tasks) { task in
-                            TaskCard(task: task)
+                            TaskCard(task: task) {
+                                taskPendingDeletion = task
+                            }
                         }
                     }
                     .padding(24)
                 }
             }
         }
+        .confirmationDialog(
+            "删除这个任务？",
+            isPresented: deletionConfirmationBinding,
+            presenting: taskPendingDeletion
+        ) { task in
+            Button("删除任务和本地图片", role: .destructive) {
+                taskPendingDeletion = nil
+                Task { await model.deleteTask(id: task.id) }
+            }
+            Button("取消", role: .cancel) {
+                taskPendingDeletion = nil
+            }
+        } message: { _ in
+            Text("任务记录和应用数据中的结果图片将被删除，另存为的副本不受影响。")
+        }
+    }
+
+    /// 将待删除任务转换为确认弹窗的显示状态。
+    private var deletionConfirmationBinding: Binding<Bool> {
+        Binding(
+            get: { taskPendingDeletion != nil },
+            set: { if !$0 { taskPendingDeletion = nil } }
+        )
     }
 }
 
 /// 展示单个任务的封面、状态、提示词和本地操作。
 private struct TaskCard: View {
     let task: GenerationTask
+    let onDelete: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -117,6 +144,12 @@ private struct TaskCard: View {
                 Text(task.model.rawValue)
                     .font(.caption2.monospaced())
                     .foregroundStyle(.secondary)
+                Button(role: .destructive, action: onDelete) {
+                    Image(systemName: "trash")
+                }
+                .buttonStyle(.borderless)
+                .accessibilityLabel("删除任务")
+                .help("删除任务")
             }
 
             Text(task.prompt)

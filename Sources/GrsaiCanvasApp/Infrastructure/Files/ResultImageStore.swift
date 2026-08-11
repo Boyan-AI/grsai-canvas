@@ -79,6 +79,24 @@ actor ResultImageStore {
         }
     }
 
+    /// 删除图片仓库直属的结果文件，拒绝越出应用管理目录的路径。
+    func delete(paths: [String]) throws {
+        let managedDirectory = directory.standardizedFileURL.resolvingSymlinksInPath()
+        for path in paths {
+            let candidate = URL(fileURLWithPath: path).standardizedFileURL
+            let parent = candidate.deletingLastPathComponent().resolvingSymlinksInPath()
+            guard parent == managedDirectory else {
+                throw GrsaiClientError.persistence("任务已删除，但检测到非应用管理的图片路径")
+            }
+            guard fileManager.fileExists(atPath: candidate.path) else { continue }
+            do {
+                try fileManager.removeItem(at: candidate)
+            } catch {
+                throw GrsaiClientError.persistence("任务已删除，但本地图片清理失败")
+            }
+        }
+    }
+
     /// 通过文件签名识别允许持久化的图片格式。
     private func detectedExtension(data: Data) throws -> String {
         let bytes = [UInt8](data.prefix(12))

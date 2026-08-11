@@ -65,4 +65,47 @@ struct WorkspaceViewModelTests {
         #expect(persisted.first?.id == "task-workspace")
         #expect(persisted.first?.status == .succeeded)
     }
+
+    /// 验证用户确认删除后的完整持久化结果。
+    @Test("删除任务会同步清理历史和本地结果")
+    func deletesTaskHistoryAndLocalResults() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let imagesDirectory = directory.appendingPathComponent("images", isDirectory: true)
+        try FileManager.default.createDirectory(at: imagesDirectory, withIntermediateDirectories: true)
+        let imageURL = imagesDirectory.appendingPathComponent("task-delete-1.png")
+        try Data([0x89, 0x50, 0x4E, 0x47]).write(to: imageURL)
+
+        let draft = GenerationDraft(
+            prompt: "待删除作品",
+            model: .gptImage2,
+            aspectRatio: .square,
+            imageSize: nil,
+            referenceImages: []
+        )
+        let response = GenerationResponse(
+            id: "task-delete",
+            status: .succeeded,
+            progress: 100,
+            results: []
+        )
+        var task = GenerationTask.submitted(response: response, requestID: UUID(), draft: draft)
+        task.localImagePaths = [imageURL.path]
+
+        let history = GenerationHistoryStore(fileURL: directory.appendingPathComponent("history.json"))
+        try await history.save([task])
+        let model = WorkspaceViewModel(
+            historyStore: history,
+            imageStore: ResultImageStore(directory: imagesDirectory),
+            secretStore: SessionSecretStore()
+        )
+        await model.load()
+
+        await model.deleteTask(id: task.id)
+
+        #expect(model.tasks.isEmpty)
+        #expect(try await history.load().isEmpty)
+        #expect(!FileManager.default.fileExists(atPath: imageURL.path))
+    }
 }
