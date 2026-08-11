@@ -4,3 +4,5 @@ __pycache__/
 generated/
 *.log
 .DS_Store
+.build/
+.codegraph/

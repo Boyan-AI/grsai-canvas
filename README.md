@@ -1,6 +1,52 @@
 # Grsai Canvas
 
-面向 Codex 的可迁移 Grsai 生图 Skill。运行链路是 Skill 目录内置的 Python CLI：支持原生异步生图、任务续查、参考图处理、结果下载和 OpenAI 兼容同步接口。
+原生 macOS 生图客户端与面向 Codex 的可迁移 Grsai 生图 Skill。macOS 客户端参考 `image.grsai.ai` 的双栏工作台，提供本地历史画廊、参考图、模型参数、异步任务恢复和结果保存；Python CLI 继续用于自动化与 Skill 调用。
+
+## macOS 客户端
+
+运行环境：macOS 14 或更高版本、Swift 6.1 或更高版本。客户端只使用 SwiftUI、Foundation 和系统框架，不依赖第三方包，也不会嵌入 Python 运行时。
+
+构建可直接启动的本地 App：
+
+```bash
+scripts/build-app.sh
+open ".build/app/Grsai Canvas.app"
+```
+
+调试构建可传入 `debug`：
+
+```bash
+scripts/build-app.sh debug
+```
+
+主要能力：
+
+- 左侧历史与结果画廊，右侧为生成控制台。
+- 支持文生图，以及最多 8 张 JPG、JPEG、PNG、WEBP 参考图。
+- 支持 gpt-image-2 与 nano-banana 系列，并按模型限制比例与清晰度组合。
+- 提交成功后立即保存任务 ID，后续只查询同一 ID；应用重启后可恢复未完成任务。
+- 成功图片下载到 `~/Library/Application Support/Grsai Canvas/Images/`，支持 Finder 定位和另存为。
+- 历史元数据保存在 `~/Library/Application Support/Grsai Canvas/history.json`。
+
+### 密钥与费用边界
+
+当前 MVP 的 API Key 只保存在应用进程内，关闭应用后自动清除；不会写入仓库、UserDefaults、历史文件或日志。每次重新启动后需要再次输入。原计划使用 Keychain，但当前开发环境的敏感文件防护禁止写入系统钥匙串实现，因此没有用明文持久化替代。
+
+点击“生成图像 · 可能产生费用”会提交真实 Grsai 任务。普通构建、启动和自动化测试不会访问 Grsai，也不会产生生图费用。提交超时且上游接收状态未知时，客户端会明确提示，不会自动重复提交；拿到任务 ID 后的轮询不会创建新任务。
+
+客户端固定使用 HTTPS Grsai 节点和 HTTPS 结果地址。单张参考图最多 10 MB，内联参考图总计最多 8 MB，下载结果最多 50 MB。
+
+### macOS 本地验证
+
+```bash
+swift test
+swift build
+scripts/build-app.sh
+```
+
+测试使用内存 Stub 和临时目录，覆盖鉴权请求、异步提交、任务续查、提交超时语义、HTTPS 边界、模型参数、参考图、历史持久化和工作台编排。
+
+## Codex Skill
 
 ## 当前能力
 
