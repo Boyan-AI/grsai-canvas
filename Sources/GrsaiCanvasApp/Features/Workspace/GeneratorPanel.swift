@@ -110,15 +110,18 @@ struct GeneratorPanel: View {
 
     private var cacheSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            sectionTitle("应用数据", detail: "仅保留 API Key")
+            sectionTitle("应用数据", detail: nil)
             Text("清除历史记录、原始参考图和生成结果图片，仅保留 API Key。")
                 .font(.caption)
                 .foregroundStyle(WorkspaceTheme.silverMist)
-            Button("清空应用数据", systemImage: "trash", role: .destructive) {
-                isCacheConfirmationPresented = true
+            HStack {
+                Spacer()
+                Button("清空应用数据", systemImage: "trash", role: .destructive) {
+                    isCacheConfirmationPresented = true
+                }
+                .buttonStyle(.borderless)
+                .disabled(model.isClearingData)
             }
-            .buttonStyle(.borderless)
-            .disabled(model.isClearingData)
         }
         .padding(14)
         .background(WorkspaceTheme.raisedSurface, in: RoundedRectangle(cornerRadius: 14))

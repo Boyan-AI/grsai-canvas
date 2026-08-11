@@ -1,17 +1,17 @@
 import SwiftUI
 
-/// 画境工作区的深色视觉令牌，映射 Refero 风格的黑、紫、琥珀和深绿色色板。
+/// 画境工作区的温暖手绘视觉令牌，使用米白、森林绿、天空蓝和暖橙构成动漫感色板。
 enum WorkspaceTheme {
-    static let void = Color(red: 0, green: 0, blue: 0)
-    static let boneWhite = Color(red: 1, green: 1, blue: 1)
-    static let ashGray = Color(red: 0.604, green: 0.604, blue: 0.604)
-    static let silverMist = Color(red: 0.741, green: 0.741, blue: 0.741)
-    static let electricIris = Color(red: 0.502, green: 0.322, blue: 1)
-    static let saffronSpark = Color(red: 1, green: 0.722, blue: 0.161)
-    static let deepVerdant = Color(red: 0.082, green: 0.518, blue: 0.431)
+    static let void = Color(red: 0.945, green: 0.925, blue: 0.875)
+    static let boneWhite = Color(red: 1, green: 0.992, blue: 0.965)
+    static let ashGray = Color(red: 0.42, green: 0.38, blue: 0.32)
+    static let silverMist = Color(red: 0.52, green: 0.48, blue: 0.42)
+    static let electricIris = Color(red: 0.31, green: 0.55, blue: 0.63)
+    static let saffronSpark = Color(red: 0.78, green: 0.38, blue: 0.20)
+    static let deepVerdant = Color(red: 0.29, green: 0.49, blue: 0.34)
 
     /// 用于工作区功能面板的微弱黑色层次，不引入 Material 的模糊和高光。
-    static let surface = Color(red: 0.035, green: 0.035, blue: 0.043)
-    static let raisedSurface = Color(red: 0.067, green: 0.067, blue: 0.082)
-    static let subtleBorder = Color.white.opacity(0.12)
+    static let surface = Color(red: 1, green: 0.992, blue: 0.965)
+    static let raisedSurface = Color(red: 0.91, green: 0.87, blue: 0.79)
+    static let subtleBorder = Color(red: 0.55, green: 0.46, blue: 0.34).opacity(0.30)
 }

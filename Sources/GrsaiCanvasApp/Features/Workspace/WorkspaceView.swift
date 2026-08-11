@@ -193,7 +193,7 @@ private struct TaskCard: View {
             }
 
             if let path = task.localImagePaths.first {
-                HStack {
+                HStack(spacing: 10) {
                     Button(action: {
                         reveal(path: path)
                     }) {
@@ -201,9 +201,9 @@ private struct TaskCard: View {
                             .frame(width: 30, height: 30)
                     }
                     .buttonStyle(.borderless)
+                    .frame(maxWidth: .infinity)
                     .accessibilityLabel("在 Finder 中显示")
                     .help("在 Finder 中显示")
-                    Spacer()
                     Button(action: {
                         saveAs(path: path)
                     }) {
@@ -211,6 +211,7 @@ private struct TaskCard: View {
                             .frame(width: 30, height: 30)
                     }
                     .buttonStyle(.borderless)
+                    .frame(maxWidth: .infinity)
                     .accessibilityLabel("另存为")
                     .help("另存为")
                     continueEditingMenu
@@ -243,6 +244,7 @@ private struct TaskCard: View {
                 .frame(width: 30, height: 30)
         }
             .buttonStyle(.borderless)
+            .frame(maxWidth: .infinity)
             .foregroundStyle(WorkspaceTheme.saffronSpark)
             .accessibilityLabel("删除任务")
             .help("删除任务")
@@ -260,6 +262,7 @@ private struct TaskCard: View {
                 .frame(width: 30, height: 30)
         }
         .menuStyle(.borderlessButton)
+        .frame(maxWidth: .infinity)
         .accessibilityLabel("继续修改")
         .help("选择参考图继续修改")
     }
