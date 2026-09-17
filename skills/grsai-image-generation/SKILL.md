@@ -7,6 +7,8 @@ description: Use when the user asks to generate, create, edit, transform, or dow
 
 通过 Skill 目录内置的 Python CLI 调用 Grsai 生图接口。脚本只依赖 Python 3.9+ 标准库，不依赖 Node、npm、MCP 注册或仓库外路径。
 
+接口维护源为 [Grsai Apifox 接口汇总](https://qmy27nhsd9.apifox.cn/llms.txt)，项目覆盖矩阵见仓库 `docs/grsai-api.md`。
+
 ## 运行入口
 
 先把 `GRSAI_SKILL_DIR` 设置为当前 Skill（即本文件所在目录）的绝对路径。所有命令都使用通用 `python3`：
@@ -31,7 +33,7 @@ export GRSAI_API_KEY="你的密钥"
 2. 首次付费提交前获得用户明确授权。若宿主已知限制外网，同时申请范围明确的 Grsai 网络权限，不要先在已知无网环境提交付费任务。用户指定其他提供方时遵循用户选择。
 3. 常规请求使用原生后端和默认 `gpt-image-2`。优先用 `generate --no-wait` 提交并立即保存 `id` 和 `request_id`，再用 `get` 等待；这样即使长等待或输出中断，仍可恢复同一任务。CLI 的等待默认值是 180 秒，但不应作为可恢复流程的默认选择。
 4. 保持提交命令的 JSON 输出可观测。宿主提供 raw/proxy 模式时优先使用；创建输出目录、提交、查询和下载分开执行，不要把它们串成一条复合 shell 命令，以免丢失任务 ID 或失败阶段。
-5. 需要 nano-banana 或 2K/4K 时显式传入 `--model` 和 `--image-size`。需要参考图时重复传入 `--reference-image`，优先使用 HTTPS URL；本地文件或 data URL 会内联并受大小限制。
+5. 需要 nano-banana 的 2K/4K 时显式传入 `--model` 和 `--image-size`；GPT Premium 的质量、透明背景和像素尺寸使用 `--quality`、`--background` 和 `--aspect-ratio`。需要参考图时重复传入 `--reference-image`，优先使用 HTTPS URL；本地文件或 data URL 会内联并受大小限制。
 6. 原生任务返回 `running` 时，只用同一个任务 ID 调用 `get`。轮询超时返回 `status: running` 是正常状态；轮询不会新建生图任务，不要因进度低或等待超时重新提交。
 7. 任务成功后展示 HTTPS 结果 URL。若采用 `--no-wait` 且需要本地文件，先单独创建输出目录，再下载 `get` 返回的 URL 并校验文件类型和尺寸。只有在网络与输出捕获都可靠时，才用 `generate --output-dir` 的同步下载流程。
 8. 错误含 `acceptance_unknown: true` 时，上游可能已经接收或计费；保留 `request_id`，停止自动重试，明确告知重试可能产生重复费用，并重新获得用户授权。若需确认是否计费，查看 Grsai 后台任务或账单，不要从客户端错误臆测。
@@ -65,7 +67,7 @@ python3 "$GRSAI_SKILL_DIR/scripts/grsai_image.py" generate \
   --aspect-ratio 1024x1024
 ```
 
-`openai-compatible` 返回本地合成 ID，不能用 `get --id` 查询；比例值应改用原生后端。
+`openai-compatible` 返回本地合成 ID，不能用 `get --id` 查询；需要比例或原生 `mask` 时使用原生后端。
 
 ## 输出与错误
 
@@ -79,6 +81,8 @@ python3 "$GRSAI_SKILL_DIR/scripts/grsai_image.py" generate \
 
 - 只允许 HTTPS 的 Grsai 节点、参考图 URL 和结果下载 URL；测试注入的本地 mock 不代表生产配置。
 - 单张本地参考图默认最多 10 MB，内联参考图解码总量默认最多 8 MB；大图应先压缩或改用 HTTPS URL。
-- `--image-size` 只用于 nano-banana；gpt-image-2 使用 `--aspect-ratio` 的标准像素值 `1024x1024`、`1536x1024` 或 `1024x1536`。
+- `--image-size` 只用于 nano-banana 系列。`gpt-image-2` 和 `gpt-image-2.5` 接受文档比例或 1K 像素值；`gpt-image-2-vip`、`gpt-image-2.5-flare` 和 `gpt-image-2.5-sunburst` 接受文档定义的像素尺寸，VIP 还接受满足约束的自定义像素值。
+- `--quality` 按模型能力校验；`--background transparent` 只用于 GPT Premium；原生 `--mask` 只接受 HTTPS 地址。
+- OpenAI 兼容后端使用 `size`、`quality` 和 `background` 字段。
 - 生图不是精确排版或逐帧动画引擎。Sprite sheet、固定网格和严格透明补格应由本地程序确定性合成与校验。
 - 如果宿主沙箱阻止外部网络，按宿主规则申请范围明确的网络授权，并提醒该操作可能产生费用；不要为了绕过限制切换到其他供应商。

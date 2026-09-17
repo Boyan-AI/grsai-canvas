@@ -9,6 +9,7 @@ from dataclasses import dataclass
 import json
 import os
 from pathlib import Path
+import re
 import sys
 from typing import Any
 from uuid import uuid4
@@ -24,7 +25,7 @@ from grsai_client import (
 from grsai_files import download_images, normalize_image_inputs
 
 
-SCRIPT_VERSION = "0.1.0"
+SCRIPT_VERSION = "0.2.0"
 MINIMUM_PYTHON = (3, 9)
 IMAGE_MODELS = (
     "nano-banana",
@@ -40,6 +41,9 @@ IMAGE_MODELS = (
     "nano-banana-pro-4k-vip",
     "gpt-image-2",
     "gpt-image-2-vip",
+    "gpt-image-2.5",
+    "gpt-image-2.5-flare",
+    "gpt-image-2.5-sunburst",
 )
 ASPECT_RATIOS = (
     "auto",
@@ -65,6 +69,53 @@ ASPECT_RATIOS = (
 )
 GPT_IMAGE_PIXEL_SIZES = ("1024x1024", "1536x1024", "1024x1536")
 IMAGE_SIZES = ("1K", "2K", "4K")
+GPT_PREMIUM_MODELS = (
+    "gpt-image-2-vip",
+    "gpt-image-2.5-flare",
+    "gpt-image-2.5-sunburst",
+)
+GPT_STANDARD_MODELS = ("gpt-image-2", "gpt-image-2.5")
+GPT_STANDARD_ASPECT_RATIOS = (
+    "auto",
+    "1:1",
+    "16:9",
+    "9:16",
+    "4:3",
+    "3:4",
+    "3:2",
+    "2:3",
+    "5:4",
+    "4:5",
+    "21:9",
+    "9:21",
+    "1:2",
+    "2:1",
+)
+GPT_PREMIUM_PIXEL_SIZES = (
+    "1024x1024", "2048x2048", "2880x2880",
+    "1280x720", "2048x1152", "3840x2160",
+    "720x1280", "1152x2048", "2160x3840",
+    "1152x864", "2304x1728", "3264x2448",
+    "864x1152", "1728x2304", "2448x3264",
+    "1536x1024", "2048x1360", "3504x2336",
+    "1024x1536", "1360x2048", "2336x3504",
+    "1120x896", "2240x1792", "3200x2560",
+    "896x1120", "1792x2240", "2560x3200",
+    "1456x624", "2912x1248", "3840x1648",
+    "624x1456", "1248x2912", "1648x3840",
+    "688x2048", "1280x3840", "2048x688", "3840x1280",
+    "1536x768", "3072x1536", "3840x1920",
+    "768x1536", "1536x3072", "1920x3840",
+)
+QUALITY_VALUES = ("auto", "low", "medium", "high", "xhigh", "max")
+QUALITY_BY_MODEL = {
+    "gpt-image-2": ("auto",),
+    "gpt-image-2.5": ("auto",),
+    "gpt-image-2-vip": ("medium",),
+    "gpt-image-2.5-flare": ("low", "medium", "high"),
+    "gpt-image-2.5-sunburst": ("low", "medium", "high", "xhigh", "max"),
+}
+GPT_MASK_PATTERN = re.compile(r"^https://[^\s/]+(?:/[^\s]*)?$")
 
 
 ClientFactory = Callable[[GrsaiConfig], GrsaiClient]
@@ -191,9 +242,12 @@ def _build_parser() -> JsonArgumentParser:
     )
     generate.add_argument(
         "--aspect-ratio",
-        choices=ASPECT_RATIOS + GPT_IMAGE_PIXEL_SIZES,
+        help="原生接口的比例或像素尺寸；VIP 模型还支持符合约束的自定义像素值",
     )
     generate.add_argument("--image-size", choices=IMAGE_SIZES)
+    generate.add_argument("--quality", choices=QUALITY_VALUES)
+    generate.add_argument("--background", choices=("transparent",))
+    generate.add_argument("--mask", help="HTTPS 遮罩图片地址")
     generate.add_argument(
         "--backend",
         choices=("native", "openai-compatible"),
@@ -239,6 +293,9 @@ def _validate_generate_arguments(
         arguments.backend,
         arguments.aspect_ratio,
         arguments.image_size,
+        arguments.quality,
+        arguments.background,
+        arguments.mask,
         request_id,
     )
 
@@ -268,11 +325,15 @@ def _validate_generation_combination(
     backend: str,
     aspect_ratio: str | None,
     image_size: str | None,
+    quality: str | None,
+    background: str | None,
+    mask: str | None,
     request_id: str,
 ) -> None:
-    """拒绝供应商不会可靠处理的模型与尺寸组合。"""
+    """依据最新接口文档拒绝不会可靠处理的模型与参数组合。"""
     is_gpt_image = model.startswith("gpt-image-2")
     is_pixel_size = aspect_ratio in GPT_IMAGE_PIXEL_SIZES
+    is_openai_pixel_size = is_pixel_size or aspect_ratio in GPT_PREMIUM_PIXEL_SIZES
     message: str | None = None
     if is_gpt_image and image_size:
         message = "gpt-image-2 系列不支持 --image-size，请使用 --aspect-ratio"
@@ -284,9 +345,24 @@ def _validate_generation_combination(
         backend == "openai-compatible"
         and aspect_ratio is not None
         and aspect_ratio != "auto"
-        and not is_pixel_size
+        and not is_openai_pixel_size
     ):
         message = "openai-compatible 仅接受 auto 或标准像素尺寸"
+    elif aspect_ratio and is_gpt_image:
+        message = _validate_gpt_aspect_ratio(model, aspect_ratio)
+    elif aspect_ratio and not is_gpt_image and aspect_ratio not in ASPECT_RATIOS:
+        message = "nano-banana 仅接受文档列出的比例"
+    if quality and quality not in QUALITY_BY_MODEL.get(model, ()):
+        message = f"{model} 不支持 quality={quality}"
+    if background and model not in GPT_PREMIUM_MODELS:
+        message = "只有 gpt-image-2-vip、gpt-image-2.5-flare 和 gpt-image-2.5-sunburst 支持透明背景"
+    if mask:
+        if not GPT_MASK_PATTERN.match(mask):
+            message = "--mask 必须是 HTTPS 图片地址"
+        elif not is_gpt_image:
+            message = "--mask 仅适用于 gpt-image-2 系列"
+        elif backend == "openai-compatible":
+            message = "openai-compatible 图片生成接口不支持 --mask，请使用原生接口"
     if message:
         raise GrsaiError(
             message,
@@ -294,6 +370,33 @@ def _validate_generation_combination(
             phase="input",
             request_id=request_id,
         )
+
+
+def _validate_gpt_aspect_ratio(model: str, value: str) -> str | None:
+    """校验 GPT 图片模型的比例、标准像素值和 VIP 自定义像素值。"""
+    if value == "auto":
+        return None
+    if model in GPT_STANDARD_MODELS:
+        if value in GPT_STANDARD_ASPECT_RATIOS or value in GPT_IMAGE_PIXEL_SIZES:
+            return None
+        return f"{model} 仅接受文档列出的比例或 1K 像素值"
+    if value in GPT_PREMIUM_PIXEL_SIZES:
+        return None
+    if model != "gpt-image-2-vip":
+        return f"{model} 仅接受文档列出的像素尺寸，不支持比例"
+    match = re.fullmatch(r"(\d+)x(\d+)", value)
+    if not match:
+        return "gpt-image-2-vip 自定义尺寸必须写成宽x高"
+    width, height = (int(part) for part in match.groups())
+    long_edge, short_edge = max(width, height), min(width, height)
+    if long_edge > 3840 or width % 16 or height % 16:
+        return "gpt-image-2-vip 自定义尺寸的边长必须不超过 3840 且为 16 的倍数"
+    if long_edge > short_edge * 3:
+        return "gpt-image-2-vip 自定义尺寸的长短边比例不能超过 3:1"
+    area = width * height
+    if area < 655_360 or area > 8_294_400:
+        return "gpt-image-2-vip 自定义尺寸的像素数必须在 655360 到 8294400 之间"
+    return None
 
 
 def _run_generate(
@@ -323,6 +426,10 @@ def _run_generate(
                 payload["image"] = images
             if arguments.aspect_ratio:
                 payload["size"] = arguments.aspect_ratio
+            if arguments.quality:
+                payload["quality"] = arguments.quality
+            if arguments.background:
+                payload["background"] = arguments.background
             response = client.generate_openai(payload, request_id=request_id)
             result: dict[str, Any] = {
                 "id": f"openai-{response['created']}",
@@ -342,6 +449,12 @@ def _run_generate(
                 payload["aspectRatio"] = arguments.aspect_ratio
             if arguments.image_size:
                 payload["imageSize"] = arguments.image_size
+            if arguments.quality:
+                payload["quality"] = arguments.quality
+            if arguments.background:
+                payload["background"] = arguments.background
+            if arguments.mask:
+                payload["mask"] = arguments.mask
             result = client.generate(payload, request_id=request_id)
             task_id = result["id"]
             if arguments.wait and result["status"] == "running":

@@ -175,6 +175,98 @@ class GrsaiCliOrchestrationTests(unittest.TestCase):
         self.assertEqual(client.wait_calls[0][0], "task-1")
         self.assertEqual(client.wait_calls[0][1], 180_000)
 
+    def test_native_gpt_25_sends_quality_background_and_mask(self) -> None:
+        """新版 GPT 原生接口应把质量、透明背景和遮罩传入请求体。"""
+        client = FakeClient(
+            generate_result={
+                "id": "task-gpt-25",
+                "status": "succeeded",
+                "results": [{"url": "https://images.example/result.png"}],
+            }
+        )
+
+        result = run_command(
+            [
+                "generate",
+                "--prompt",
+                "去除背景",
+                "--model",
+                "gpt-image-2.5-sunburst",
+                "--aspect-ratio",
+                "2048x2048",
+                "--quality",
+                "xhigh",
+                "--background",
+                "transparent",
+                "--mask",
+                "https://images.example/mask.png",
+                "--no-wait",
+            ],
+            {"GRSAI_API_KEY": "test-key"},
+            client_factory=lambda _config: client,
+        )
+
+        self.assertEqual(result.exit_code, 0)
+        self.assertEqual(client.generate_calls[0][0]["model"], "gpt-image-2.5-sunburst")
+        self.assertEqual(client.generate_calls[0][0]["aspectRatio"], "2048x2048")
+        self.assertEqual(client.generate_calls[0][0]["quality"], "xhigh")
+        self.assertEqual(client.generate_calls[0][0]["background"], "transparent")
+        self.assertEqual(client.generate_calls[0][0]["mask"], "https://images.example/mask.png")
+
+    def test_gpt_vip_accepts_documented_custom_pixel_size(self) -> None:
+        """GPT VIP 应接受文档约束内的自定义像素尺寸。"""
+        client = FakeClient(
+            generate_result={"id": "task-vip", "status": "running", "progress": 1}
+        )
+
+        result = run_command(
+            [
+                "generate",
+                "--prompt",
+                "高分辨率产品图",
+                "--model",
+                "gpt-image-2-vip",
+                "--aspect-ratio",
+                "3200x2560",
+                "--quality",
+                "medium",
+                "--no-wait",
+            ],
+            {"GRSAI_API_KEY": "test-key"},
+            client_factory=lambda _config: client,
+        )
+
+        self.assertEqual(result.exit_code, 0)
+        self.assertEqual(client.generate_calls[0][0]["aspectRatio"], "3200x2560")
+
+    def test_unsupported_quality_stops_before_client_creation(self) -> None:
+        """不属于模型能力表的质量参数不得触发客户端创建。"""
+        calls = 0
+
+        def fail_factory(_config: object) -> FakeClient:
+            """记录不应发生的客户端创建。"""
+            nonlocal calls
+            calls += 1
+            raise AssertionError("不应创建客户端")
+
+        result = run_command(
+            [
+                "generate",
+                "--prompt",
+                "产品图",
+                "--model",
+                "gpt-image-2.5",
+                "--quality",
+                "high",
+            ],
+            {"GRSAI_API_KEY": "test-key"},
+            client_factory=fail_factory,
+        )
+
+        self.assertEqual(result.exit_code, 2)
+        self.assertEqual(result.payload["error"]["code"], "INVALID_PARAMETER_COMBINATION")
+        self.assertEqual(calls, 0)
+
     def test_poll_timeout_returns_running_task_without_resubmitting(self) -> None:
         """可恢复轮询超时应返回已有任务，而不是失败或重复提交。"""
         client = FakeClient(
@@ -228,6 +320,40 @@ class GrsaiCliOrchestrationTests(unittest.TestCase):
         self.assertEqual(result.payload["id"], "openai-123")
         self.assertEqual(result.payload["status"], "succeeded")
         self.assertEqual(client.openai_calls[0][0]["size"], "1024x1024")
+
+    def test_openai_backend_sends_quality_and_background(self) -> None:
+        """OpenAI 图片生成接口应发送文档定义的质量和背景字段。"""
+        client = FakeClient(
+            openai_result={
+                "created": 456,
+                "data": [{"url": "https://images.example/openai-vip.png"}],
+            }
+        )
+
+        result = run_command(
+            [
+                "generate",
+                "--prompt",
+                "透明产品图",
+                "--model",
+                "gpt-image-2-vip",
+                "--backend",
+                "openai-compatible",
+                "--aspect-ratio",
+                "2048x2048",
+                "--quality",
+                "medium",
+                "--background",
+                "transparent",
+            ],
+            {"GRSAI_API_KEY": "test-key"},
+            client_factory=lambda _config: client,
+        )
+
+        self.assertEqual(result.exit_code, 0)
+        submitted = client.openai_calls[0][0]
+        self.assertEqual(submitted["quality"], "medium")
+        self.assertEqual(submitted["background"], "transparent")
 
     def test_invalid_model_size_combination_stops_before_client_creation(self) -> None:
         """不可靠参数组合应在可能计费的客户端调用前拒绝。"""
