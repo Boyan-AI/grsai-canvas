@@ -22,7 +22,7 @@ from grsai_client import (
     redact_sensitive_text,
     to_safe_error_message,
 )
-from grsai_files import download_images, normalize_image_inputs
+from grsai_files import download_media, normalize_audio_inputs, normalize_image_inputs
 
 
 SCRIPT_VERSION = "0.2.0"
@@ -45,6 +45,9 @@ IMAGE_MODELS = (
     "gpt-image-2.5-flare",
     "gpt-image-2.5-sunburst",
 )
+VIDEO_MODELS = ("minimax-h3",)
+VIDEO_ASPECT_RATIOS = ("portrait", "landscape", "square")
+VIDEO_RESOLUTIONS = ("480p", "768p", "1080p")
 ASPECT_RATIOS = (
     "auto",
     "1:1",
@@ -148,7 +151,7 @@ def run_command(
     environ: Mapping[str, str] | None = None,
     *,
     client_factory: ClientFactory = GrsaiClient,
-    download_function: DownloadFunction = download_images,
+    download_function: DownloadFunction = download_media,
 ) -> CommandResult:
     """解析并执行一个 CLI 命令，不直接写标准输出。"""
     request_id = str(uuid4())
@@ -180,7 +183,7 @@ def run_command(
             task_id = parsed.id.strip()
             config = load_config(environ)
             client = client_factory(config)
-            output = _run_get(parsed, client, request_id)
+            output = _run_get(parsed, config, client, request_id, download_function)
             return CommandResult(0, output)
         raise CliArgumentError("必须指定 generate、get 或 doctor 子命令")
     except CliArgumentError as error:
@@ -233,7 +236,7 @@ def _build_parser() -> JsonArgumentParser:
 
     generate = commands.add_parser("generate", help="生成或参考图片编辑")
     generate.add_argument("--prompt", help="生图提示词")
-    generate.add_argument("--model", choices=IMAGE_MODELS, default="gpt-image-2")
+    generate.add_argument("--model", choices=IMAGE_MODELS + VIDEO_MODELS, default="gpt-image-2")
     generate.add_argument(
         "--reference-image",
         action="append",
@@ -242,8 +245,17 @@ def _build_parser() -> JsonArgumentParser:
     )
     generate.add_argument(
         "--aspect-ratio",
-        help="原生接口的比例或像素尺寸；VIP 模型还支持符合约束的自定义像素值",
+        help="图片比例/像素尺寸，或视频 portrait、landscape、square",
     )
+    generate.add_argument(
+        "--reference-audio",
+        action="append",
+        default=[],
+        help="视频可重复传入 HTTPS URL、data URL 或本地音频路径",
+    )
+    generate.add_argument("--resolution", choices=VIDEO_RESOLUTIONS)
+    generate.add_argument("--duration", type=int, help="视频时长，单位秒，范围 1-15")
+    generate.add_argument("--seed", type=int, help="视频随机种子")
     generate.add_argument("--image-size", choices=IMAGE_SIZES)
     generate.add_argument("--quality", choices=QUALITY_VALUES)
     generate.add_argument("--background", choices=("transparent",))
@@ -266,6 +278,8 @@ def _build_parser() -> JsonArgumentParser:
     get = commands.add_parser("get", help="查询已有原生生图任务")
     get.add_argument("--id", help="generate 返回的原生任务 ID")
     get.add_argument("--wait-timeout-seconds", type=int, default=0)
+    get.add_argument("--media-type", choices=("image", "video"), default="image")
+    get.add_argument("--output-dir", help="成功后下载结果的本地绝对目录")
 
     commands.add_parser("doctor", help="检查 Python 运行时与 Grsai 配置")
     return parser
@@ -282,8 +296,11 @@ def _validate_generate_arguments(
     if len(prompt) > 32_000:
         raise CliArgumentError("--prompt 最多允许 32000 个字符")
     arguments.prompt = prompt
-    if len(arguments.reference_image) > 8:
-        raise CliArgumentError("--reference-image 最多允许 8 个")
+    maximum_images = 9 if arguments.model in VIDEO_MODELS else 8
+    if len(arguments.reference_image) > maximum_images:
+        raise CliArgumentError(f"--reference-image 最多允许 {maximum_images} 个")
+    if len(arguments.reference_audio) > 3:
+        raise CliArgumentError("--reference-audio 最多允许 3 个")
     if arguments.wait_timeout_seconds < 5 or arguments.wait_timeout_seconds > 300:
         raise CliArgumentError("--wait-timeout-seconds 必须在 5 到 300 之间")
     if arguments.output_dir and not Path(arguments.output_dir).is_absolute():
@@ -296,6 +313,10 @@ def _validate_generate_arguments(
         arguments.quality,
         arguments.background,
         arguments.mask,
+        arguments.reference_audio,
+        arguments.resolution,
+        arguments.duration,
+        arguments.seed,
         request_id,
     )
 
@@ -317,6 +338,8 @@ def _validate_get_arguments(
         )
     if arguments.wait_timeout_seconds < 0 or arguments.wait_timeout_seconds > 300:
         raise CliArgumentError("--wait-timeout-seconds 必须在 0 到 300 之间")
+    if arguments.output_dir and not Path(arguments.output_dir).is_absolute():
+        raise CliArgumentError("--output-dir 必须是绝对路径")
     arguments.id = task_id
 
 
@@ -328,10 +351,44 @@ def _validate_generation_combination(
     quality: str | None,
     background: str | None,
     mask: str | None,
+    reference_audio: Sequence[str],
+    resolution: str | None,
+    duration: int | None,
+    seed: int | None,
     request_id: str,
 ) -> None:
     """依据最新接口文档拒绝不会可靠处理的模型与参数组合。"""
+    is_video = model in VIDEO_MODELS
     is_gpt_image = model.startswith("gpt-image-2")
+    if is_video:
+        invalid = []
+        if backend != "native":
+            invalid.append("视频仅支持 native 后端")
+        if aspect_ratio is not None and aspect_ratio not in VIDEO_ASPECT_RATIOS:
+            invalid.append("视频比例必须是 portrait、landscape 或 square")
+        if image_size or quality or background or mask:
+            invalid.append("视频不支持 image-size、quality、background 或 mask")
+        if len(reference_audio) > 3:
+            invalid.append("视频最多支持 3 个参考音频")
+        if duration is not None and not 1 <= duration <= 15:
+            invalid.append("视频时长必须在 1 到 15 秒之间")
+        if resolution == "1080p" and duration is not None and duration > 10:
+            invalid.append("1080p 视频时长最多 10 秒")
+        if invalid:
+            raise GrsaiError(
+                "；".join(invalid),
+                code="INVALID_PARAMETER_COMBINATION",
+                phase="input",
+                request_id=request_id,
+            )
+        return
+    if reference_audio or resolution or duration is not None or seed is not None:
+        raise GrsaiError(
+            "视频参数只适用于 minimax-h3",
+            code="INVALID_PARAMETER_COMBINATION",
+            phase="input",
+            request_id=request_id,
+        )
     is_pixel_size = aspect_ratio in GPT_IMAGE_PIXEL_SIZES
     is_openai_pixel_size = is_pixel_size or aspect_ratio in GPT_PREMIUM_PIXEL_SIZES
     message: str | None = None
@@ -406,7 +463,7 @@ def _run_generate(
     request_id: str,
     download_function: DownloadFunction,
 ) -> dict[str, Any]:
-    """编排图片输入、两种后端、异步轮询和可选下载。"""
+    """编排图片或视频输入、异步轮询和可选下载。"""
     phase = "input"
     task_id: str | None = None
     try:
@@ -415,6 +472,12 @@ def _run_generate(
             config.max_reference_image_bytes,
             config.max_reference_total_bytes,
         )
+        is_video = arguments.model in VIDEO_MODELS
+        audios = normalize_audio_inputs(
+            arguments.reference_audio,
+            config.max_reference_image_bytes,
+            config.max_reference_total_bytes,
+        ) if is_video else []
         if arguments.backend == "openai-compatible":
             phase = "sync_generate"
             payload: dict[str, Any] = {
@@ -443,6 +506,44 @@ def _run_generate(
                 "prompt": arguments.prompt,
                 "replyType": "async",
             }
+            if is_video:
+                # 视频接口使用独立字段，默认值与文档允许范围保持一致。
+                payload["aspectRatio"] = arguments.aspect_ratio or "landscape"
+                payload["resolution"] = arguments.resolution or "768p"
+                payload["duration"] = arguments.duration or 5
+                if images:
+                    payload["images"] = images
+                if audios:
+                    payload["audios"] = audios
+                if arguments.seed is not None:
+                    payload["seed"] = arguments.seed
+                result = client.generate(payload, request_id=request_id)
+                task_id = result["id"]
+                result = {**result, "media_type": "video"}
+                if arguments.wait and result["status"] == "running":
+                    phase = "poll"
+                    submitted = result
+                    try:
+                        result = client.wait_for_result(
+                            result["id"],
+                            arguments.wait_timeout_seconds * 1_000,
+                            request_id=request_id,
+                        )
+                    except GrsaiError as error:
+                        if not _is_recoverable_polling_error(error):
+                            raise
+                        result = submitted
+                    result = {**result, "media_type": "video"}
+                task_id = result["id"]
+                phase = "download"
+                return _prepare_output(
+                    result,
+                    request_id,
+                    output_dir=arguments.output_dir,
+                    config=config,
+                    download_function=download_function,
+                    media_type="video",
+                )
             if images:
                 payload["images"] = images
             if arguments.aspect_ratio:
@@ -499,8 +600,10 @@ def _run_generate(
 
 def _run_get(
     arguments: argparse.Namespace,
+    config: GrsaiConfig,
     client: GrsaiClient,
     request_id: str,
+    download_function: DownloadFunction = download_media,
 ) -> dict[str, Any]:
     """查询已有任务，并按需在同一任务 ID 上继续等待。"""
     try:
@@ -522,7 +625,14 @@ def _run_get(
                 if not _is_recoverable_polling_error(error):
                     raise
                 result = initial
-        return _prepare_output(result, request_id)
+        return _prepare_output(
+            result,
+            request_id,
+            output_dir=arguments.output_dir,
+            config=config,
+            download_function=download_function,
+            media_type=arguments.media_type,
+        )
     except GrsaiError as error:
         if error.task_id is None:
             error.task_id = arguments.id
@@ -547,9 +657,10 @@ def _prepare_output(
     *,
     output_dir: str | None = None,
     config: GrsaiConfig | None = None,
-    download_function: DownloadFunction = download_images,
+    download_function: DownloadFunction = download_media,
+    media_type: str | None = None,
 ) -> dict[str, Any]:
-    """把任务结果转换为稳定 JSON，并按需下载成功图片。"""
+    """把任务结果转换为稳定 JSON，并按需下载成功媒体。"""
     urls = [item["url"] for item in result.get("results", [])]
     files: list[str] = []
     if result["status"] == "succeeded" and output_dir and urls:
@@ -575,6 +686,8 @@ def _prepare_output(
         "urls": urls,
         "files": files,
     }
+    resolved_media_type = media_type or str(result.get("media_type", "image"))
+    output["media_type"] = resolved_media_type
     if "progress" in result:
         output["progress"] = result["progress"]
     return output

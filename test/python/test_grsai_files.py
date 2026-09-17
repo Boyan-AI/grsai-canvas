@@ -22,6 +22,8 @@ from grsai_client import GrsaiError  # noqa: E402
 from grsai_files import (  # noqa: E402
     DownloadResponse,
     download_images,
+    download_media,
+    normalize_audio_inputs,
     normalize_image_inputs,
 )
 
@@ -130,6 +132,33 @@ class ImageInputTests(unittest.TestCase):
         self.assertEqual(raised.exception.code, "UNSUPPORTED_IMAGE_TYPE")
 
 
+class AudioInputTests(unittest.TestCase):
+    """验证视频参考音频的 URL、data URL 与本地文件处理。"""
+
+    def test_audio_data_url_and_local_mp3_are_normalized(self) -> None:
+        """音频 data URL 和本地 MP3 都应转换为 API 可接受的值。"""
+        encoded = base64.b64encode(b"audio").decode("ascii")
+        inline = normalize_audio_inputs([f"data:audio/mpeg;base64,{encoded}"], 1_024)
+        self.assertTrue(inline[0].startswith("data:audio/mpeg;base64,"))
+
+        with TemporaryDirectory(prefix="grsai-audio-") as directory:
+            path = Path(directory) / "reference.mp3"
+            path.write_bytes(b"audio")
+            local = normalize_audio_inputs([str(path)], 1_024)
+
+        self.assertTrue(local[0].startswith("data:audio/mpeg;base64,"))
+
+    def test_invalid_audio_data_url_and_http_url_are_rejected(self) -> None:
+        """音频 data URL 必须是有效 Base64，远程地址必须使用 HTTPS。"""
+        with self.assertRaises(GrsaiError) as invalid_data:
+            normalize_audio_inputs(["data:audio/mpeg;base64,%%%"], 1_024)
+        with self.assertRaises(GrsaiError) as insecure:
+            normalize_audio_inputs(["http://audio.example/ref.mp3"], 1_024)
+
+        self.assertEqual(invalid_data.exception.code, "INVALID_AUDIO_DATA_URL")
+        self.assertEqual(insecure.exception.code, "INVALID_AUDIO_URL")
+
+
 class DownloadTests(unittest.TestCase):
     """验证图片下载限制和本地文件写入。"""
 
@@ -228,6 +257,29 @@ class DownloadTests(unittest.TestCase):
             )
 
         self.assertTrue(files[0].endswith(".webp"))
+
+    def test_video_content_type_uses_mp4_extension(self) -> None:
+        """视频响应应按 Content-Type 保存为 MP4 文件。"""
+        fetcher = StubDownloadFetcher(
+            [
+                DownloadResponse(
+                    status=200,
+                    headers={"Content-Type": "video/mp4"},
+                    body=b"mp4",
+                    final_url="https://video.example/result",
+                )
+            ]
+        )
+        with TemporaryDirectory(prefix="grsai-video-output-") as directory:
+            files = download_media(
+                ["https://video.example/result"],
+                directory,
+                "task-video",
+                1_024,
+                fetcher=fetcher,
+            )
+
+        self.assertTrue(files[0].endswith(".mp4"))
 
     def test_insecure_initial_or_redirect_url_is_rejected(self) -> None:
         """初始地址和重定向后的最终地址都必须保持 HTTPS。"""

@@ -24,12 +24,24 @@ MIME_TYPES = {
     ".png": "image/png",
     ".webp": "image/webp",
 }
+AUDIO_MIME_TYPES = {
+    ".aac": "audio/aac",
+    ".flac": "audio/flac",
+    ".m4a": "audio/mp4",
+    ".mp3": "audio/mpeg",
+    ".ogg": "audio/ogg",
+    ".opus": "audio/opus",
+    ".wav": "audio/wav",
+}
 CONTENT_TYPE_EXTENSIONS = {
     "image/avif": ".avif",
     "image/gif": ".gif",
     "image/jpeg": ".jpg",
     "image/png": ".png",
     "image/webp": ".webp",
+    "video/mp4": ".mp4",
+    "video/quicktime": ".mov",
+    "video/webm": ".webm",
 }
 
 
@@ -77,7 +89,31 @@ def normalize_image_inputs(
     return normalized
 
 
-def download_images(
+def normalize_audio_inputs(
+    inputs: Sequence[str] | None,
+    max_bytes: int,
+    max_total_bytes: int | None = None,
+) -> list[str]:
+    """把视频接口的 HTTPS、data URL 或本地音频转换为 API 输入。"""
+    if not inputs:
+        return []
+    total_limit = max_total_bytes if max_total_bytes is not None else max_bytes * 3
+    normalized: list[str] = []
+    total_inline_bytes = 0
+    for item in inputs:
+        value, inline_bytes = _normalize_audio_input(item, max_bytes)
+        total_inline_bytes += inline_bytes
+        if total_inline_bytes > total_limit:
+            raise GrsaiError(
+                "参考音频内联总量超过限制",
+                code="REFERENCE_PAYLOAD_TOO_LARGE",
+                phase="input",
+            )
+        normalized.append(value)
+    return normalized
+
+
+def download_media(
     urls: Sequence[str],
     output_dir: str,
     task_id: str,
@@ -87,7 +123,7 @@ def download_images(
     timeout_ms: int = 45_000,
     request_id: str | None = None,
 ) -> list[str]:
-    """下载 HTTPS 图片并使用独占创建保证不覆盖已有文件。"""
+    """下载 HTTPS 图片或视频，并使用独占创建保证不覆盖已有文件。"""
     directory = Path(output_dir).expanduser().resolve()
     directory.mkdir(parents=True, exist_ok=True)
     resolved_fetcher = fetcher or _default_download_fetcher
@@ -95,7 +131,7 @@ def download_images(
     for index, source in enumerate(urls, start=1):
         _require_https_url(source, "生成结果 URL", "INVALID_RESULT_URL")
         started_at = time.monotonic()
-        request = Request(source, method="GET", headers={"Accept": "image/*"})
+        request = Request(source, method="GET", headers={"Accept": "image/*,video/*"})
         try:
             response = resolved_fetcher(request, timeout_ms / 1_000, max_bytes)
             _require_https_url(
@@ -146,6 +182,28 @@ def download_images(
     return downloaded
 
 
+def download_images(
+    urls: Sequence[str],
+    output_dir: str,
+    task_id: str,
+    max_bytes: int,
+    *,
+    fetcher: DownloadFetcher | None = None,
+    timeout_ms: int = 45_000,
+    request_id: str | None = None,
+) -> list[str]:
+    """保留旧图片下载入口，内部复用媒体下载实现。"""
+    return download_media(
+        urls,
+        output_dir,
+        task_id,
+        max_bytes,
+        fetcher=fetcher,
+        timeout_ms=timeout_ms,
+        request_id=request_id,
+    )
+
+
 def _normalize_image_input(value: str, max_bytes: int) -> tuple[str, int]:
     """校验单个参考图并返回规范值与内联字节数。"""
     normalized = value.strip()
@@ -187,6 +245,30 @@ def _normalize_image_input(value: str, max_bytes: int) -> tuple[str, int]:
     return f"data:{mime_type};base64,{encoded}", file_size
 
 
+def _normalize_audio_input(value: str, max_bytes: int) -> tuple[str, int]:
+    """校验单个视频参考音频并返回规范值与内联字节数。"""
+    normalized = value.strip()
+    parsed = urlsplit(normalized)
+    if parsed.scheme.lower() == "https":
+        _require_https_url(normalized, "参考音频 URL", "INVALID_AUDIO_URL")
+        return normalized, 0
+    if normalized.lower().startswith("data:audio/"):
+        return normalized, _validate_audio_data_url(normalized, max_bytes)
+    if parsed.scheme:
+        raise GrsaiError("参考音频 URL 必须使用 HTTPS", code="INVALID_AUDIO_URL", phase="input")
+    file_path = Path(normalized).expanduser().resolve()
+    if not file_path.is_file():
+        raise GrsaiError(f"参考音频不存在或不是文件：{file_path}", code="AUDIO_NOT_FOUND", phase="input")
+    file_size = file_path.stat().st_size
+    if file_size > max_bytes:
+        raise GrsaiError(f"参考音频超过大小限制：{file_path}", code="AUDIO_TOO_LARGE", phase="input")
+    mime_type = AUDIO_MIME_TYPES.get(file_path.suffix.lower())
+    if mime_type is None:
+        raise GrsaiError(f"不支持的参考音频格式：{file_path}", code="UNSUPPORTED_AUDIO_TYPE", phase="input")
+    encoded = base64.b64encode(file_path.read_bytes()).decode("ascii")
+    return f"data:{mime_type};base64,{encoded}", file_size
+
+
 def _validate_data_url(value: str, max_bytes: int) -> int:
     """严格校验 Base64 data URL 并返回真实解码大小。"""
     match = re.fullmatch(
@@ -222,6 +304,20 @@ def _validate_data_url(value: str, max_bytes: int) -> int:
             code="IMAGE_TOO_LARGE",
             phase="input",
         )
+    return len(decoded)
+
+
+def _validate_audio_data_url(value: str, max_bytes: int) -> int:
+    """严格校验 Base64 音频 data URL 并返回真实解码大小。"""
+    match = re.fullmatch(r"data:(audio/[a-z0-9.+-]+);base64,(.*)", value, flags=re.IGNORECASE | re.DOTALL)
+    if match is None:
+        raise GrsaiError("参考音频 data URL 必须使用 base64 编码", code="INVALID_AUDIO_DATA_URL", phase="input")
+    try:
+        decoded = base64.b64decode(match.group(2), validate=True)
+    except (ValueError, base64.binascii.Error) as error:
+        raise GrsaiError("参考音频 data URL 包含无效 base64 数据", code="INVALID_AUDIO_DATA_URL", phase="input") from error
+    if len(decoded) > max_bytes:
+        raise GrsaiError("内联参考音频超过大小限制", code="AUDIO_TOO_LARGE", phase="input")
     return len(decoded)
 
 

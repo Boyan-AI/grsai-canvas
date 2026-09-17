@@ -12,7 +12,7 @@
 
 - `POST /v1/api/generate`
 - `GET /v1/api/result?id=<task_id>`
-- 模型：`nano-banana` 系列、`gpt-image-2`、`gpt-image-2-vip`、`gpt-image-2.5`、`gpt-image-2.5-flare`、`gpt-image-2.5-sunburst`
+- 模型：图片模型，以及视频模型 `minimax-h3`
 - 通用字段：`model`、`prompt`、`images`、`aspectRatio`、`replyType: async`
 - GPT 扩展字段：`quality`、`background: transparent`、原生接口 `mask`
 - 返回：`id`、`status`、可选 `progress`、`results[].url`、`error`
@@ -25,6 +25,13 @@ Python Skill 会在请求前校验模型能力：
 - `gpt-image-2-vip`、`gpt-image-2.5-flare`、`gpt-image-2.5-sunburst` 使用 `auto` 或文档像素值；VIP 允许满足边长、比例和像素总数约束的自定义像素值。
 - `quality` 按模型能力表校验；透明背景只允许 GPT Premium 模型。
 - 轮询只调用已有任务 ID，不会重新提交生成任务。
+
+### 原生异步视频生成
+
+- `POST /v1/api/generate` 使用 `model: minimax-h3`，查询仍使用 `GET /v1/api/result?id=<task_id>`。
+- 请求字段：`prompt`、`aspectRatio: portrait|landscape|square`、`images`（最多 9 张）、`audios`（最多 3 个）、`resolution: 480p|768p|1080p`、`duration`（1–15 秒）、`replyType: async` 和可选 `seed`。
+- `1080p` 时 `duration` 最多 10 秒；Python Skill 支持 HTTPS、data URL 和本地音频参考。
+- 视频结果仍返回 `results[].url`，客户端以 `media_type: video` 保存历史并使用视频播放器预览；单文件下载上限继续为 50 MB。
 
 ### OpenAI 图片生成兼容接口
 
@@ -40,9 +47,9 @@ Python Skill 会在请求前校验模型能力：
 - `POST /v1beta/models/{model_name}:generateContent`：Gemini 官方格式。
 - `POST /v1beta/models/{model_name}:streamGenerateContent`：Gemini 流式格式。
 - `POST /v1/chat/completions`：OpenAI Chat Completions 格式。
-- `POST /v1/api/generate` 的 `minimax-h3`：视频生成，字段包含 `audios`、`resolution`、`duration` 和 `seed`，不能直接复用当前图片历史结构。
+- 其他未列出的对话、Gemini 格式和 multipart 编辑接口仍未接入。
 
-接入上述能力时，应先增加媒体类型、结果下载校验和历史持久化契约，再改工作台 UI；不要把视频 URL 当作图片直接预览。
+视频 URL 不能交给图片预览组件；新增媒体模型时需同步结果下载校验和历史持久化契约。
 
 ## 本地验证
 
@@ -52,6 +59,7 @@ Python Skill 会在请求前校验模型能力：
 python3 -m unittest discover -s test/python -p 'test_*.py' -v
 python3 -m py_compile skills/grsai-image-generation/scripts/*.py
 cd macos && swift test
+# Android 本地构建：在 Android Studio 或配置好 JDK 的环境执行
 ```
 
 最后核对文档源是否有字段变化，并同步更新 `skills/grsai-image-generation/`、macOS/Android 模型清单和测试。真实生图联调必须单独确认，因为提交接口可能产生费用。

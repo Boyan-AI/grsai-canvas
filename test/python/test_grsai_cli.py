@@ -175,6 +175,80 @@ class GrsaiCliOrchestrationTests(unittest.TestCase):
         self.assertEqual(client.wait_calls[0][0], "task-1")
         self.assertEqual(client.wait_calls[0][1], 180_000)
 
+    def test_minimax_h3_sends_video_payload_and_preserves_media_type(self) -> None:
+        """minimax-h3 应发送视频字段，并在轮询后保留视频类型。"""
+        client = FakeClient(
+            generate_result={"id": "video-1", "status": "running", "progress": 5},
+            wait_result={
+                "id": "video-1",
+                "status": "succeeded",
+                "results": [{"url": "https://video.example/result.mp4"}],
+            },
+        )
+        download_calls: list[list[str]] = []
+
+        def fake_download(urls: list[str], *_args: Any, **_kwargs: Any) -> list[str]:
+            """记录视频下载请求并返回本地路径。"""
+            download_calls.append(urls)
+            return ["/tmp/video.mp4"]
+
+        with TemporaryDirectory(prefix="grsai-video-cli-") as directory:
+            result = run_command(
+                [
+                    "generate", "--prompt", "镜头推进",
+                    "--model", "minimax-h3",
+                    "--aspect-ratio", "portrait",
+                    "--resolution", "1080p",
+                    "--duration", "8",
+                    "--reference-image", "https://images.example/ref.png",
+                    "--reference-audio", "https://audio.example/ref.mp3",
+                    "--seed", "42",
+                    "--output-dir", directory,
+                ],
+                {"GRSAI_API_KEY": "test-key"},
+                client_factory=lambda _config: client,
+                download_function=fake_download,
+            )
+
+        self.assertEqual(result.exit_code, 0)
+        self.assertEqual(result.payload["media_type"], "video")
+        self.assertEqual(result.payload["files"], ["/tmp/video.mp4"])
+        submitted = client.generate_calls[0][0]
+        self.assertEqual(submitted["model"], "minimax-h3")
+        self.assertEqual(submitted["aspectRatio"], "portrait")
+        self.assertEqual(submitted["resolution"], "1080p")
+        self.assertEqual(submitted["duration"], 8)
+        self.assertEqual(submitted["replyType"], "async")
+        self.assertEqual(submitted["seed"], 42)
+        self.assertEqual(submitted["images"], ["https://images.example/ref.png"])
+        self.assertEqual(submitted["audios"], ["https://audio.example/ref.mp3"])
+        self.assertEqual(download_calls, [["https://video.example/result.mp4"]])
+
+    def test_video_invalid_parameters_are_rejected_before_client_creation(self) -> None:
+        """视频非法组合必须在创建客户端和网络请求前失败。"""
+        calls = 0
+
+        def fail_factory(_config: object) -> FakeClient:
+            """记录不应发生的客户端创建。"""
+            nonlocal calls
+            calls += 1
+            raise AssertionError("不应创建客户端")
+
+        result = run_command(
+            [
+                "generate", "--prompt", "长镜头",
+                "--model", "minimax-h3",
+                "--resolution", "1080p",
+                "--duration", "11",
+            ],
+            {"GRSAI_API_KEY": "test-key"},
+            client_factory=fail_factory,
+        )
+
+        self.assertEqual(result.exit_code, 2)
+        self.assertEqual(result.payload["error"]["code"], "INVALID_PARAMETER_COMBINATION")
+        self.assertEqual(calls, 0)
+
     def test_native_gpt_25_sends_quality_background_and_mask(self) -> None:
         """新版 GPT 原生接口应把质量、透明背景和遮罩传入请求体。"""
         client = FakeClient(
@@ -481,6 +555,37 @@ class GrsaiCliOrchestrationTests(unittest.TestCase):
         self.assertEqual(result.payload["status"], "succeeded")
         self.assertEqual(client.get_calls[0][0], "task-get")
         self.assertEqual(client.wait_calls[0][1], 10_000)
+
+    def test_get_video_can_download_with_explicit_media_type(self) -> None:
+        """get 指定视频类型和输出目录时应复用已有任务下载结果。"""
+        client = FakeClient(
+            get_result={
+                "id": "video-get",
+                "status": "succeeded",
+                "results": [{"url": "https://video.example/result.mp4"}],
+            }
+        )
+        download_calls: list[list[str]] = []
+
+        def fake_download(urls: list[str], *_args: Any, **_kwargs: Any) -> list[str]:
+            """记录已有视频任务的下载请求。"""
+            download_calls.append(urls)
+            return ["/tmp/video-get.mp4"]
+
+        with TemporaryDirectory(prefix="grsai-video-get-") as directory:
+            result = run_command(
+                [
+                    "get", "--id", "video-get", "--media-type", "video",
+                    "--output-dir", directory,
+                ],
+                {"GRSAI_API_KEY": "test-key"},
+                client_factory=lambda _config: client,
+                download_function=fake_download,
+            )
+
+        self.assertEqual(result.exit_code, 0)
+        self.assertEqual(result.payload["media_type"], "video")
+        self.assertEqual(download_calls, [["https://video.example/result.mp4"]])
 
     def test_get_rejects_openai_synthetic_id(self) -> None:
         """兼容后端合成 ID 不得被错误地用于原生查询。"""
