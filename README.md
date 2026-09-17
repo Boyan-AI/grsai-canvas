@@ -1,6 +1,14 @@
 # 画境
 
-原生 macOS 生图客户端与面向 Codex 的可迁移 Grsai 生图 Skill。画境参考 `image.grsai.ai` 的双栏工作台，提供本地历史画廊、参考图、模型参数、异步任务恢复和结果保存；Python CLI 继续用于自动化与 Skill 调用。
+原生 macOS 图片/视频/文本客户端、Android 客户端与面向 Codex 的可迁移 Grsai Skill。画境参考 `image.grsai.ai` 的双栏工作台，提供本地历史画廊、参考图、模型参数、异步任务恢复、文本结果和结果保存；Python CLI 继续用于自动化与 Skill 调用。
+
+仓库按客户端分层：`macos/` 为 macOS 客户端，`android/` 为 Android 客户端；`skills/` 与 `test/` 为跨平台 Skill 和 Python 验证。
+
+## Android 客户端（开发中）
+
+Android 版本位于 `android/`，使用 Kotlin、Jetpack Compose 和 Android SDK 36，复用 macOS 版本的 Grsai 任务契约与费用边界。当前已包含 API Key 的 Keystore 加密保存、原生图片、OpenAI 图片生成、图片编辑、`minimax-h3` 视频、OpenAI Chat、Gemini 普通/流式接口、参考图、历史任务持久化、任务轮询、后台 WorkManager 续查、结果媒体本地缓存和按媒体类型预览。
+
+Android 构建依赖 Android Studio 或已配置的 Gradle/JDK；当前环境已完成 Debug APK 构建。开发阶段请使用 Mock 或测试 Key，点击生成会产生真实 Grsai 费用。
 
 ## macOS 客户端
 
@@ -9,14 +17,23 @@
 一键构建并安装到当前用户桌面：
 
 ```bash
-./install.sh
+./install-macos.sh
 ```
 
 安装结果为桌面上的 `画境.app`。如果桌面存在旧的 `Grsai Canvas.app` 或同名 App，脚本会关闭并直接覆盖，安装完成后自动启动新版本。
 
-构建可直接启动的本地 App：
+一键构建并安装 Android Debug APK：
 
 ```bash
+./install-android.sh
+```
+
+Android 脚本会调用 `android/gradlew` 或系统 Gradle 构建 Debug APK；检测到 adb 设备时会自动安装，否则只保留 APK。
+
+macOS 构建可直接启动的本地 App：
+
+```bash
+cd macos
 scripts/build-app.sh
 open ".build/app/画境.app"
 ```
@@ -24,16 +41,19 @@ open ".build/app/画境.app"
 调试构建可传入 `debug`：
 
 ```bash
+cd macos
 scripts/build-app.sh debug
 ```
 
 主要能力：
 
 - 左侧历史与结果画廊，右侧为生成控制台。
-- 支持文生图，以及最多 8 张 JPG、JPEG、PNG、WEBP 参考图。
-- 支持 gpt-image-2 与 nano-banana 系列，并按模型限制比例与清晰度组合。
+- 支持文生图，以及 `minimax-h3` 文生视频；图片最多 8 张、视频最多 9 张 JPG、JPEG、PNG、WEBP 参考图。
+- 工作台支持原生图片、原生视频、OpenAI 图片、图片编辑、OpenAI Chat、Gemini 和 Gemini 流式七种接口模式；文本响应会以文本卡片进入历史。
+- 支持 gpt-image-2、gpt-image-2.5 系列与 nano-banana 系列，并按模型限制比例、像素尺寸、质量和透明背景组合。
+- OpenAI 图片生成与编辑支持服务模型、质量和背景字段；Chat 支持文本/参考图与流式开关；Gemini 支持参考图和 generationConfig JSON。
 - 提交成功后立即保存任务 ID，后续只查询同一 ID；应用重启后可恢复未完成任务。
-- 成功图片下载到 `~/Library/Application Support/Grsai Canvas/Images/`，支持 Finder 定位和另存为。
+- 成功图片或视频下载到 `~/Library/Application Support/Grsai Canvas/Images/`，支持 Finder 定位、另存为和按媒体类型预览。
 - 历史元数据保存在 `~/Library/Application Support/Grsai Canvas/history.json`。
 
 ### 密钥与费用边界
@@ -47,6 +67,7 @@ scripts/build-app.sh debug
 ### macOS 本地验证
 
 ```bash
+cd macos
 swift test
 swift build
 scripts/build-app.sh
@@ -56,13 +77,19 @@ scripts/build-app.sh
 
 ## Codex Skill
 
+接口维护以 [Grsai 接口维护契约](docs/grsai-api.md) 和 [Apifox 接口汇总](https://qmy27nhsd9.apifox.cn/llms.txt) 为准。
+
 ## 当前能力
 
-- `generate`：按提示词生成或编辑图片，支持 nano-banana 与 gpt-image-2 系列。
+- `generate`：按提示词生成或编辑图片，或使用 `minimax-h3` 生成异步视频；视频支持比例、480p/768p/1080p、1–15 秒时长、seed 和参考音频。
+- `edit`：调用 multipart 图片编辑接口。
+- `chat`：调用 OpenAI Chat，支持普通和 SSE 流式响应。
+- `gemini`：调用 Gemini `generateContent`，支持普通和 SSE 流式响应。
 - `get`：按原生任务 ID 查询进度和结果，不创建新任务。
 - `doctor`：检查 Python 运行时和密钥配置，不发网络请求。
 - 参考图支持 HTTPS URL、data URL 和本地图片文件。
 - 结果 URL 可按需下载到绝对路径，并限制响应大小、遵循安全重定向、避免覆盖已有文件。
+- 结果包含 `media_type`，视频下载器支持 MP4、MOV 和 WebM，视频预览不会进入图片组件。
 - 错误保留请求 ID、阶段、重试性、超时和上游请求 ID 等安全诊断；不会返回 API Key 或完整上游响应体。
 
 ## 安装
@@ -159,7 +186,7 @@ python3 "$GRSAI_SKILL_DIR/scripts/grsai_image.py" generate \
 
 ## 模型、参考图与安全边界
 
-- `--image-size` 只用于 nano-banana 系列；gpt-image-2 使用标准像素值 `1024x1024`、`1536x1024`、`1024x1536`，或原生后端的比例值。
+- `--image-size` 只用于 nano-banana 系列；gpt-image-2/gpt-image-2.5 使用文档比例或像素值，VIP/Flare/Sunburst 支持文档定义的 1K–4K 像素尺寸。
 - OpenAI 兼容后端只接受 `auto` 或上述标准像素值；需要比例时使用原生后端。
 - 本地参考图和 data URL 会内联进请求。单张默认最多 10 MB，内联总量默认最多 8 MB；大图优先使用 HTTPS URL。
 - 只允许 HTTPS 上游和结果地址；本地 HTTP 仅可由测试注入，不作为生产开关。

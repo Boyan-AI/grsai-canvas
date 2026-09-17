@@ -43,10 +43,16 @@ class FakeClient:
         self.get_result_value = get_result
         self.wait_result = wait_result
         self.openai_result = openai_result
+        self.edit_result: dict[str, Any] | BaseException | None = None
+        self.chat_result: dict[str, Any] | BaseException | None = None
+        self.gemini_result: dict[str, Any] | BaseException | None = None
         self.generate_calls: list[tuple[dict[str, Any], dict[str, Any]]] = []
         self.get_calls: list[tuple[str, dict[str, Any]]] = []
         self.wait_calls: list[tuple[str, int, dict[str, Any]]] = []
         self.openai_calls: list[tuple[dict[str, Any], dict[str, Any]]] = []
+        self.edit_calls: list[tuple[dict[str, str], dict[str, Any]]] = []
+        self.chat_calls: list[tuple[dict[str, Any], dict[str, Any]]] = []
+        self.gemini_calls: list[tuple[str, dict[str, Any], dict[str, Any]]] = []
 
     def generate(self, payload: dict[str, Any], **context: Any) -> dict[str, Any]:
         """记录原生提交并返回预设结果。"""
@@ -76,6 +82,21 @@ class FakeClient:
         """记录同步生图并返回预设结果。"""
         self.openai_calls.append((payload, context))
         return self._resolve(self.openai_result)
+
+    def edit_image(self, fields: dict[str, str], **context: Any) -> dict[str, Any]:
+        """记录图片编辑 multipart 字段并返回预设结果。"""
+        self.edit_calls.append((fields, context))
+        return self._resolve(self.edit_result)
+
+    def chat_completion(self, payload: dict[str, Any], **context: Any) -> dict[str, Any]:
+        """记录 Chat 请求并返回预设文本。"""
+        self.chat_calls.append((payload, context))
+        return self._resolve(self.chat_result)
+
+    def gemini_content(self, model: str, payload: dict[str, Any], **context: Any) -> dict[str, Any]:
+        """记录 Gemini 请求并返回预设文本。"""
+        self.gemini_calls.append((model, payload, context))
+        return self._resolve(self.gemini_result)
 
     @staticmethod
     def _resolve(value: dict[str, Any] | BaseException | None) -> dict[str, Any]:
@@ -586,6 +607,50 @@ class GrsaiCliOrchestrationTests(unittest.TestCase):
         self.assertEqual(result.exit_code, 0)
         self.assertEqual(result.payload["media_type"], "video")
         self.assertEqual(download_calls, [["https://video.example/result.mp4"]])
+
+    def test_edit_command_builds_image_edit_request(self) -> None:
+        """edit 命令应把本地或远程图片交给图片编辑接口。"""
+        client = FakeClient()
+        client.edit_result = {
+            "created": 123,
+            "data": [{"url": "https://images.example/edited.png"}],
+        }
+
+        result = run_command(
+            [
+                "edit", "--prompt", "戴帽子",
+                "--image", "https://images.example/input.png",
+            ],
+            {"GRSAI_API_KEY": "test-key"},
+            client_factory=lambda _config: client,
+        )
+
+        self.assertEqual(result.exit_code, 0)
+        self.assertEqual(result.payload["urls"], ["https://images.example/edited.png"])
+        self.assertEqual(client.edit_calls[0][0]["model"], "gpt-image-2.5")
+
+    def test_chat_and_gemini_commands_build_text_payloads(self) -> None:
+        """chat 和 gemini 命令应输出文本并构造官方格式请求。"""
+        chat = FakeClient()
+        chat.chat_result = {"id": "chat-1", "status": "succeeded", "text": "你好"}
+        chat_result = run_command(
+            ["chat", "--model", "gemini-3.1-pro", "--message", "你好"],
+            {"GRSAI_API_KEY": "test-key"},
+            client_factory=lambda _config: chat,
+        )
+        gemini = FakeClient()
+        gemini.gemini_result = {"id": "gemini-1", "status": "succeeded", "text": "你好"}
+        gemini_result = run_command(
+            ["gemini", "--model", "gemini-3.8-flash", "--prompt", "你好", "--stream"],
+            {"GRSAI_API_KEY": "test-key"},
+            client_factory=lambda _config: gemini,
+        )
+
+        self.assertEqual(chat_result.payload["media_type"], "text")
+        self.assertEqual(chat_result.payload["text"], "你好")
+        self.assertEqual(chat.chat_calls[0][0]["messages"][0]["content"], "你好")
+        self.assertEqual(gemini_result.payload["text"], "你好")
+        self.assertEqual(gemini.gemini_calls[0][1]["contents"][0]["parts"][0]["text"], "你好")
 
     def test_get_rejects_openai_synthetic_id(self) -> None:
         """兼容后端合成 ID 不得被错误地用于原生查询。"""

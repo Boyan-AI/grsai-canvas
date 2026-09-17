@@ -5,7 +5,7 @@ description: Use when the user asks to generate, create, edit, transform, or dow
 
 # Grsai Image Generation
 
-通过 Skill 目录内置的 Python CLI 调用 Grsai 图片和视频生成接口。脚本只依赖 Python 3.9+ 标准库，不依赖 Node、npm、MCP 注册或仓库外路径。
+通过 Skill 目录内置的 Python CLI 调用 Grsai 图片、视频、图片编辑和文本接口。脚本只依赖 Python 3.9+ 标准库，不依赖 Node、npm、MCP 注册或仓库外路径。
 
 接口维护源为 [Grsai Apifox 接口汇总](https://qmy27nhsd9.apifox.cn/llms.txt)，项目覆盖矩阵见仓库 `docs/grsai-api.md`。
 
@@ -86,12 +86,31 @@ python3 "$GRSAI_SKILL_DIR/scripts/grsai_image.py" generate \
 
 `openai-compatible` 返回本地合成 ID，不能用 `get --id` 查询；需要比例或原生 `mask` 时使用原生后端。
 
+文本和编辑接口：
+
+```bash
+# OpenAI 图片编辑，image 可为本地文件或 HTTPS URL
+python3 "$GRSAI_SKILL_DIR/scripts/grsai_image.py" edit \
+  --model gpt-image-2 --prompt "去掉背景并保留主体" \
+  --image "/absolute/input.png" --background transparent
+
+# OpenAI Chat；--stream 会合并 SSE 增量文本
+python3 "$GRSAI_SKILL_DIR/scripts/grsai_image.py" chat \
+  --model gemini-3.1-pro --message "请介绍这张图" --stream
+
+# Gemini generateContent；--stream 对应 streamGenerateContent
+python3 "$GRSAI_SKILL_DIR/scripts/grsai_image.py" gemini \
+  --model gemini-3.1-pro --prompt "写一段产品文案" --stream
+```
+
+Chat、Gemini 和编辑请求会返回稳定 JSON 文本或图片结果；流式接口在 CLI 内合并响应，便于历史记录和自动化处理。macOS 与 Android 工作台也提供相同的七种接口模式，详情见 `docs/grsai-api.md`。
+
 ## 输出与错误
 
 - 除 `--help` 外，标准输出只包含一个 UTF-8 JSON 对象；诊断摘要写入标准错误，不输出 traceback。
 - 退出码 `0` 表示成功、仍在运行或 `doctor` 已完成；`2` 表示参数/配置错误；`3` 表示上游、生成或下载失败。
 - 成功或运行中的结果包含 `request_id`、`id`、`status`、`urls`、`files`，运行中可能包含 `progress`。
-- 结果同时包含 `media_type`：图片为 `image`，`minimax-h3` 视频为 `video`。
+- 结果同时包含 `media_type`：图片为 `image`，`minimax-h3` 视频为 `video`，Chat/Gemini 为 `text`。
 - 失败结果包含 `status: "failed"`、`urls: []`、`files: []` 以及 `error.code`、`message`、`phase`、`backend`、`retryable`、`acceptance_unknown`；可选字段用于 HTTP 状态、上游请求 ID 和超时诊断。
 - 向用户展示结果 URL 和已下载的本地路径；明确说明任务仍在运行、内容安全拦截或失败阶段，并保留任务 ID 供续查。
 

@@ -185,7 +185,25 @@ def run_command(
             client = client_factory(config)
             output = _run_get(parsed, config, client, request_id, download_function)
             return CommandResult(0, output)
-        raise CliArgumentError("必须指定 generate、get 或 doctor 子命令")
+        if parsed.command == "edit":
+            backend = "openai-edit"
+            _validate_edit_arguments(parsed, request_id)
+            config = load_config(environ)
+            client = client_factory(config)
+            return CommandResult(
+                0,
+                _run_edit(parsed, config, client, request_id, download_function),
+            )
+        if parsed.command in {"chat", "gemini"}:
+            backend = parsed.command
+            _validate_text_arguments(parsed, request_id)
+            config = load_config(environ)
+            client = client_factory(config)
+            return CommandResult(
+                0,
+                _run_text_command(parsed, config, client, request_id),
+            )
+        raise CliArgumentError("必须指定 generate、get、edit、chat、gemini 或 doctor 子命令")
     except CliArgumentError as error:
         grsai_error = GrsaiError(
             str(error),
@@ -230,11 +248,11 @@ def _build_parser() -> JsonArgumentParser:
     """创建三个公开子命令及其稳定参数。"""
     parser = JsonArgumentParser(
         prog="grsai-image",
-        description="通过 Grsai 生成、查询并下载图片",
+        description="通过 Grsai 生成图片、视频和文本结果",
     )
     commands = parser.add_subparsers(dest="command", metavar="COMMAND")
 
-    generate = commands.add_parser("generate", help="生成或参考图片编辑")
+    generate = commands.add_parser("generate", help="生成图片或视频")
     generate.add_argument("--prompt", help="生图提示词")
     generate.add_argument("--model", choices=IMAGE_MODELS + VIDEO_MODELS, default="gpt-image-2")
     generate.add_argument(
@@ -280,6 +298,30 @@ def _build_parser() -> JsonArgumentParser:
     get.add_argument("--wait-timeout-seconds", type=int, default=0)
     get.add_argument("--media-type", choices=("image", "video"), default="image")
     get.add_argument("--output-dir", help="成功后下载结果的本地绝对目录")
+
+    edit = commands.add_parser("edit", help="调用 OpenAI 图片编辑接口")
+    edit.add_argument("--prompt", help="编辑提示词")
+    edit.add_argument("--model", choices=IMAGE_MODELS, default="gpt-image-2.5")
+    edit.add_argument("--image", action="append", default=[], help="参考图片 URL、data URL 或本地图片路径")
+    edit.add_argument("--quality", choices=QUALITY_VALUES)
+    edit.add_argument("--background", choices=("transparent",))
+    edit.add_argument("--mask", help="HTTPS 遮罩图片地址")
+    edit.add_argument("--output-dir", help="成功后下载结果的本地绝对目录")
+
+    chat = commands.add_parser("chat", help="调用 OpenAI Chat Completions 接口")
+    chat.add_argument("--model", required=True, help="模型名称，接口支持所有模型")
+    chat.add_argument("--message", action="append", default=[], help="用户消息，可重复传入")
+    chat.add_argument("--messages-json", help="完整 messages JSON 数组")
+    chat.add_argument("--reference-image", action="append", default=[], help="多模态消息的参考图")
+    chat.add_argument("--stream", action="store_true", help="按流式响应解析并累积文本")
+
+    gemini = commands.add_parser("gemini", help="调用 Gemini generateContent 接口")
+    gemini.add_argument("--model", required=True, help="Gemini 模型名称")
+    gemini.add_argument("--prompt", help="用户提示词")
+    gemini.add_argument("--reference-image", action="append", default=[], help="inlineData 参考图")
+    gemini.add_argument("--generation-config", help="generationConfig JSON 对象")
+    gemini.add_argument("--payload-json", help="直接传入完整请求 JSON 对象")
+    gemini.add_argument("--stream", action="store_true", help="调用 streamGenerateContent")
 
     commands.add_parser("doctor", help="检查 Python 运行时与 Grsai 配置")
     return parser
@@ -341,6 +383,35 @@ def _validate_get_arguments(
     if arguments.output_dir and not Path(arguments.output_dir).is_absolute():
         raise CliArgumentError("--output-dir 必须是绝对路径")
     arguments.id = task_id
+
+
+def _validate_edit_arguments(arguments: argparse.Namespace, request_id: str) -> None:
+    """校验图片编辑的 multipart 参数。"""
+    if not (arguments.prompt or "").strip():
+        raise CliArgumentError("edit 必须提供非空 --prompt")
+    if not arguments.image:
+        raise CliArgumentError("edit 必须提供至少一个 --image")
+    if len(arguments.image) > 1:
+        raise CliArgumentError("edit 当前最多支持一个 --image")
+    if arguments.output_dir and not Path(arguments.output_dir).is_absolute():
+        raise CliArgumentError("--output-dir 必须是绝对路径")
+    if arguments.mask and not GPT_MASK_PATTERN.match(arguments.mask):
+        raise CliArgumentError("--mask 必须是 HTTPS 图片地址")
+    if arguments.quality not in (None, *QUALITY_VALUES):
+        raise CliArgumentError("--quality 参数无效")
+
+
+def _validate_text_arguments(arguments: argparse.Namespace, request_id: str) -> None:
+    """校验 Chat 和 Gemini 文本接口的消息输入。"""
+    if arguments.command == "chat":
+        if not arguments.messages_json and not arguments.message:
+            raise CliArgumentError("chat 必须提供 --message 或 --messages-json")
+        if arguments.messages_json:
+            _parse_object(arguments.messages_json, "--messages-json", request_id, expected=list)
+    elif not arguments.payload_json and not (arguments.prompt or "").strip():
+        raise CliArgumentError("gemini 必须提供 --prompt 或 --payload-json")
+    if getattr(arguments, "generation_config", None):
+        _parse_object(arguments.generation_config, "--generation-config", request_id, expected=dict)
 
 
 def _validate_generation_combination(
@@ -596,6 +667,164 @@ def _run_generate(
             request_id=request_id,
             task_id=task_id,
         ) from error
+
+
+def _run_edit(
+    arguments: argparse.Namespace,
+    config: GrsaiConfig,
+    client: GrsaiClient,
+    request_id: str,
+    download_function: DownloadFunction,
+) -> dict[str, Any]:
+    """编排 OpenAI 图片编辑的输入、multipart 请求和可选下载。"""
+    image = normalize_image_inputs(
+        arguments.image,
+        config.max_reference_image_bytes,
+        config.max_reference_total_bytes,
+    )[0]
+    fields: dict[str, str] = {
+        "model": arguments.model,
+        "prompt": arguments.prompt.strip(),
+        "image": image,
+    }
+    if arguments.quality:
+        fields["quality"] = arguments.quality
+    if arguments.background:
+        fields["background"] = arguments.background
+    if arguments.mask:
+        fields["mask"] = arguments.mask
+    response = client.edit_image(fields, request_id=request_id)
+    result = {
+        "id": f"edit-{response['created']}",
+        "status": "succeeded",
+        "results": response["data"],
+    }
+    return _prepare_output(
+        result,
+        request_id,
+        output_dir=arguments.output_dir,
+        config=config,
+        download_function=download_function,
+        media_type="image",
+    )
+
+
+def _run_text_command(
+    arguments: argparse.Namespace,
+    config: GrsaiConfig,
+    client: GrsaiClient,
+    request_id: str,
+) -> dict[str, Any]:
+    """编排 Chat、Gemini 普通和流式文本请求。"""
+    if arguments.command == "chat":
+        payload = _build_chat_payload(arguments, config, request_id)
+        response = client.chat_completion(payload, stream=arguments.stream, request_id=request_id)
+        interface = "chat-stream" if arguments.stream else "chat"
+    else:
+        payload = _build_gemini_payload(arguments, config, request_id)
+        response = client.gemini_content(
+            arguments.model, payload, stream=arguments.stream, request_id=request_id
+        )
+        interface = "gemini-stream" if arguments.stream else "gemini"
+    output: dict[str, Any] = {
+        "request_id": request_id,
+        "status": response.get("status", "succeeded"),
+        "media_type": "text",
+        "text": response.get("text", ""),
+        "urls": [],
+        "files": [],
+        "interface": interface,
+    }
+    if response.get("id"):
+        output["id"] = response["id"]
+    if response.get("usage") is not None:
+        output["usage"] = response["usage"]
+    if arguments.stream:
+        output["chunks"] = response.get("chunks", [])
+    return output
+
+
+def _build_chat_payload(
+    arguments: argparse.Namespace,
+    config: GrsaiConfig,
+    request_id: str,
+) -> dict[str, Any]:
+    """构造 Chat 请求，兼容纯文本和图片多模态消息。"""
+    if arguments.messages_json:
+        messages = _parse_object(arguments.messages_json, "--messages-json", request_id, expected=list)
+        return {"model": arguments.model, "stream": arguments.stream, "messages": messages}
+    images = normalize_image_inputs(
+        arguments.reference_image,
+        config.max_reference_image_bytes,
+        config.max_reference_total_bytes,
+    )
+    messages: list[dict[str, Any]] = []
+    for index, message in enumerate(arguments.message):
+        content: Any = message
+        if index == len(arguments.message) - 1 and images:
+            content = [{"type": "text", "text": message}]
+            content.extend(
+                {"type": "image_url", "image_url": {"url": image}}
+                for image in images
+            )
+        messages.append({"role": "user", "content": content})
+    return {"model": arguments.model, "stream": arguments.stream, "messages": messages}
+
+
+def _build_gemini_payload(
+    arguments: argparse.Namespace,
+    config: GrsaiConfig,
+    request_id: str,
+) -> dict[str, Any]:
+    """构造 Gemini 官方格式的文本和 inlineData 请求。"""
+    if arguments.payload_json:
+        return _parse_object(arguments.payload_json, "--payload-json", request_id, expected=dict)
+    images = normalize_image_inputs(
+        arguments.reference_image,
+        config.max_reference_image_bytes,
+        config.max_reference_total_bytes,
+    )
+    parts: list[dict[str, Any]] = [{"text": arguments.prompt.strip()}]
+    for image in images:
+        mime, _, encoded = image.partition(",")
+        parts.append(
+            {
+                "inlineData": {
+                    "mimeType": mime.removeprefix("data:").split(";", 1)[0],
+                    "data": encoded,
+                }
+            }
+        )
+    payload: dict[str, Any] = {
+        "contents": [{"role": "user", "parts": parts}],
+        "generationConfig": {},
+    }
+    if arguments.generation_config:
+        payload["generationConfig"] = _parse_object(
+            arguments.generation_config, "--generation-config", request_id, expected=dict
+        )
+    return payload
+
+
+def _parse_object(value: str, label: str, request_id: str, *, expected: type) -> Any:
+    """解析 JSON 参数并确保其顶层类型符合接口要求。"""
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError as error:
+        raise GrsaiError(
+            f"{label} 必须是合法 JSON",
+            code="INVALID_ARGUMENTS",
+            phase="input",
+            request_id=request_id,
+        ) from error
+    if not isinstance(parsed, expected):
+        raise GrsaiError(
+            f"{label} 的顶层类型不正确",
+            code="INVALID_ARGUMENTS",
+            phase="input",
+            request_id=request_id,
+        )
+    return parsed
 
 
 def _run_get(

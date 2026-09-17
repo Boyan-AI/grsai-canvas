@@ -36,18 +36,43 @@ Python Skill 会在请求前校验模型能力：
 ### OpenAI 图片生成兼容接口
 
 - `POST /v1/images/generations`
-- Python Skill 的 `--backend openai-compatible` 已接入 `image`、`size`、`quality` 和 `background` 字段。
+- Python Skill、macOS 和 Android 已接入 `model`、`prompt`、`size`、`quality` 和 `background` 字段。
 - 该接口是同步响应；返回的本地合成 ID 不能交给原生 `get` 查询。
 
-## 暂未接入
+### OpenAI 图片编辑
 
-下列接口已出现在汇总文档中，但当前项目没有对应的媒体或对话领域模型：
+- `POST /v1/images/edits`
+- 使用 multipart/form-data 上传 `model`、`prompt`、`image`，可选 `quality`、`background`、`mask`。
+- Python CLI 的 `edit`、macOS 和 Android UI 已接入；响应复用同步图片结果模型。
 
-- `POST /v1/images/edits`：multipart 图片编辑接口，后续需要单独设计文件上传和结果模型。
-- `POST /v1beta/models/{model_name}:generateContent`：Gemini 官方格式。
-- `POST /v1beta/models/{model_name}:streamGenerateContent`：Gemini 流式格式。
-- `POST /v1/chat/completions`：OpenAI Chat Completions 格式。
-- 其他未列出的对话、Gemini 格式和 multipart 编辑接口仍未接入。
+### Gemini 内容生成
+
+- `POST /v1beta/models/{model_name}:generateContent`
+- `POST /v1beta/models/{model_name}:streamGenerateContent`
+- 请求使用 `contents[].parts[]`，图片使用 `inlineData`，可选 `generationConfig`。
+- Python CLI 的 `gemini --stream`、macOS 的 Gemini/Gemini 流式模式和 Android 对应模式已接入。
+- 流式传输层会把 SSE 增量合并为文本历史，保留完整结果供预览和恢复。
+
+### OpenAI Chat
+
+- `POST /v1/chat/completions`
+- 请求使用 `model`、`messages` 和 `stream`；消息支持文本和 `image_url`。
+- Python CLI 的 `chat --stream`、macOS Chat 模式和 Android Chat 模式已接入。
+- SSE 增量会在客户端合并为一条文本结果；同步响应使用 `choices[].message.content`。
+
+## 覆盖矩阵
+
+| 接口 | Python CLI | macOS UI | Android UI | 结果 |
+| --- | --- | --- | --- | --- |
+| 原生图片生成 | `generate` | 原生图片 | 原生图片 | 异步图片任务 |
+| GPT 图片生成 | `generate` / OpenAI 兼容 | OpenAI 图片 | OpenAI 图片 | 同步图片 |
+| `minimax-h3` 视频 | `generate` | 原生视频 | 原生视频 | 异步视频 |
+| 异步查询 | `get` | 自动轮询 | 自动轮询与后台续查 | 图片/视频 |
+| Gemini `generateContent` | `gemini` | Gemini | Gemini | 文本 |
+| Gemini `streamGenerateContent` | `gemini --stream` | Gemini 流式 | Gemini 流式 | 累积文本 |
+| OpenAI Chat | `chat` | OpenAI Chat | OpenAI Chat | 文本 |
+| OpenAI 图片编辑 | `edit` | 图片编辑 | 图片编辑 | 同步图片 |
+| OpenAI 图片生成 | `generate --backend openai-compatible` | OpenAI 图片 | OpenAI 图片 | 同步图片 |
 
 视频 URL 不能交给图片预览组件；新增媒体模型时需同步结果下载校验和历史持久化契约。
 
@@ -59,7 +84,7 @@ Python Skill 会在请求前校验模型能力：
 python3 -m unittest discover -s test/python -p 'test_*.py' -v
 python3 -m py_compile skills/grsai-image-generation/scripts/*.py
 cd macos && swift test
-# Android 本地构建：在 Android Studio 或配置好 JDK 的环境执行
+cd android && ./gradlew :app:assembleDebug
 ```
 
 最后核对文档源是否有字段变化，并同步更新 `skills/grsai-image-generation/`、macOS/Android 模型清单和测试。真实生图联调必须单独确认，因为提交接口可能产生费用。

@@ -25,6 +25,7 @@ from support import (  # noqa: E402
     advancing_clock,
     json_response,
     make_config,
+    response,
 )
 
 
@@ -224,6 +225,52 @@ class GrsaiClientTests(unittest.TestCase):
             result["data"][0]["url"], "https://images.example/result.png"
         )
         self.assertTrue(requester.calls[0][0].full_url.endswith("/v1/images/generations"))
+
+    def test_edit_image_sends_multipart_fields(self) -> None:
+        """图片编辑接口应发送 multipart 字段并校验结果 URL。"""
+        requester = StubRequester(
+            [json_response('{"created":123,"data":[{"url":"https://images.example/edit.png"}]}')]
+        )
+        client = GrsaiClient(make_config(), requester=requester)
+
+        result = client.edit_image(
+            {"model": "gpt-image-2.5", "prompt": "戴帽子", "image": "https://images.example/input.png"}
+        )
+
+        request = requester.calls[0][0]
+        body = (request.data or b"").decode("utf-8")
+        self.assertEqual(result["data"][0]["url"], "https://images.example/edit.png")
+        self.assertTrue(request.full_url.endswith("/v1/images/edits"))
+        self.assertIn('name="model"', body)
+        self.assertIn("gpt-image-2.5", body)
+        self.assertIn('name="image"', body)
+        self.assertIn("multipart/form-data", request.get_header("Content-type") or "")
+
+    def test_chat_and_gemini_streams_accumulate_text(self) -> None:
+        """Chat 和 Gemini SSE 响应应合并增量文本。"""
+        chat = GrsaiClient(
+            make_config(),
+            requester=StubRequester(
+                [response(200, (
+                    'data: {"id":"c1","choices":[{"delta":{"content":"你"}}]}\n\n'
+                    'data: {"choices":[{"delta":{"content":"好"}}]}\n\ndata: [DONE]\n'
+                ).encode("utf-8"))]
+            ),
+        )
+        gemini = GrsaiClient(
+            make_config(),
+            requester=StubRequester(
+                [response(200, (
+                    'data: {"responseId":"g1","candidates":[{"content":{"parts":[{"text":"你好"}]}}]}\n'
+                ).encode("utf-8"))]
+            ),
+        )
+
+        chat_result = chat.chat_completion({"model": "gemini-3.1-pro", "messages": []}, stream=True)
+        gemini_result = gemini.gemini_content("gemini-3.8-flash", {"contents": []}, stream=True)
+
+        self.assertEqual(chat_result["text"], "你好")
+        self.assertEqual(gemini_result["text"], "你好")
 
     def test_missing_key_never_calls_requester(self) -> None:
         """缺少密钥时不得发出任何网络请求。"""

@@ -10,7 +10,7 @@ import socket
 import time
 from typing import Any
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode, urlsplit
+from urllib.parse import quote, urlencode, urlsplit
 from urllib.request import Request, urlopen
 from uuid import uuid4
 
@@ -265,6 +265,89 @@ class GrsaiClient:
         )
         return _parse_openai_response(response, resolved_request_id)
 
+    def edit_image(
+        self,
+        fields: Mapping[str, str],
+        *,
+        request_id: str | None = None,
+        timeout_ms: int | None = None,
+    ) -> dict[str, Any]:
+        """调用 OpenAI 图片编辑 multipart 接口并校验图片结果。"""
+        resolved_request_id = request_id or str(uuid4())
+        boundary = f"----grsai-{uuid4().hex}"
+        body = _encode_multipart_fields(fields, boundary)
+        response = self._request_raw(
+            "/v1/images/edits",
+            method="POST",
+            data=body,
+            content_type=f"multipart/form-data; boundary={boundary}",
+            accept="application/json",
+            request_id=resolved_request_id,
+            timeout_ms=timeout_ms or self.config.sync_generation_timeout_ms,
+            phase="image_edit",
+            acceptance_unknown_on_timeout=True,
+        )
+        payload = _parse_json(response, "image_edit", resolved_request_id)
+        return _parse_openai_response(payload, resolved_request_id)
+
+    def chat_completion(
+        self,
+        payload: Mapping[str, Any],
+        *,
+        stream: bool = False,
+        request_id: str | None = None,
+        timeout_ms: int | None = None,
+    ) -> dict[str, Any]:
+        """调用 OpenAI Chat 接口，统一返回完整文本和流式片段。"""
+        resolved_request_id = request_id or str(uuid4())
+        response = self._request_raw(
+            "/v1/chat/completions",
+            method="POST",
+            data=_encode_json_payload(payload),
+            content_type="application/json",
+            accept="text/event-stream" if stream else "application/json",
+            request_id=resolved_request_id,
+            timeout_ms=timeout_ms or self.config.sync_generation_timeout_ms,
+            phase="chat",
+            acceptance_unknown_on_timeout=True,
+        )
+        if stream:
+            return _parse_sse_response(response.body, "chat", resolved_request_id)
+        parsed = _parse_json(response, "chat", resolved_request_id)
+        return _parse_chat_response(parsed, resolved_request_id)
+
+    def gemini_content(
+        self,
+        model: str,
+        payload: Mapping[str, Any],
+        *,
+        stream: bool = False,
+        request_id: str | None = None,
+        timeout_ms: int | None = None,
+    ) -> dict[str, Any]:
+        """调用 Gemini 官方格式普通或流式接口。"""
+        if not model or len(model) > 120 or "/" in model:
+            raise GrsaiError("Gemini 模型名无效", code="INVALID_ARGUMENTS", phase="input")
+        resolved_request_id = request_id or str(uuid4())
+        action = "streamGenerateContent" if stream else "generateContent"
+        path = f"/v1beta/models/{quote(model, safe='')}:" + action
+        response = self._request_raw(
+            path,
+            method="POST",
+            data=_encode_json_payload(payload),
+            content_type="application/json",
+            accept="text/event-stream" if stream else "application/json",
+            request_id=resolved_request_id,
+            timeout_ms=timeout_ms or self.config.sync_generation_timeout_ms,
+            phase="gemini_stream" if stream else "gemini",
+            acceptance_unknown_on_timeout=True,
+        )
+        phase = "gemini_stream" if stream else "gemini"
+        if stream:
+            return _parse_sse_response(response.body, phase, resolved_request_id)
+        parsed = _parse_json(response, phase, resolved_request_id)
+        return _parse_gemini_response(parsed, resolved_request_id)
+
     def _get_result_within_deadline(
         self,
         task_id: str,
@@ -300,6 +383,33 @@ class GrsaiClient:
         acceptance_unknown_on_timeout: bool,
     ) -> Any:
         """发送 JSON 请求，并统一转换 HTTP、网络与超时错误。"""
+        response = self._request_raw(
+            path,
+            method=method,
+            data=_encode_json_payload(payload) if payload is not None else None,
+            content_type="application/json",
+            accept="application/json",
+            request_id=request_id,
+            timeout_ms=timeout_ms,
+            phase=phase,
+            acceptance_unknown_on_timeout=acceptance_unknown_on_timeout,
+        )
+        return _parse_json(response, phase, request_id)
+
+    def _request_raw(
+        self,
+        path: str,
+        *,
+        method: str,
+        data: bytes | None,
+        content_type: str,
+        accept: str,
+        request_id: str,
+        timeout_ms: int,
+        phase: str,
+        acceptance_unknown_on_timeout: bool,
+    ) -> HttpResponse:
+        """发送原始 HTTP 响应，供 JSON、SSE 和 multipart 接口共用。"""
         if not self.config.api_key:
             raise GrsaiError(
                 "缺少 GRSAI_API_KEY 环境变量",
@@ -308,21 +418,14 @@ class GrsaiClient:
                 request_id=request_id,
             )
         started_at = self.clock_ms()
-        data = (
-            json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode(
-                "utf-8"
-            )
-            if payload is not None
-            else None
-        )
         request = Request(
             f"{self.config.base_url}{path}",
             data=data,
             method=method,
             headers={
                 "Authorization": f"Bearer {self.config.api_key}",
-                "Content-Type": "application/json",
-                "Accept": "application/json",
+                "Content-Type": content_type,
+                "Accept": accept,
             },
         )
         try:
@@ -364,8 +467,11 @@ class GrsaiClient:
                 acceptance_unknown=acceptance_unknown_on_timeout,
             ) from error
 
-        parsed = _parse_json(response, phase, request_id)
         if response.status < 200 or response.status >= 300:
+            try:
+                parsed: Any = _parse_json(response, phase, request_id)
+            except GrsaiError:
+                parsed = None
             raise GrsaiError(
                 _extract_error_message(
                     parsed,
@@ -382,7 +488,7 @@ class GrsaiClient:
                 ),
                 elapsed_ms=max(0, self.clock_ms() - started_at),
             )
-        return parsed
+        return response
 
     def _request_timeout_error(
         self,
@@ -439,6 +545,117 @@ def _parse_json(
             phase=phase,
             request_id=request_id,
         ) from error
+
+
+def _encode_json_payload(payload: Mapping[str, Any]) -> bytes:
+    """将结构化请求编码为稳定的 UTF-8 JSON。"""
+    return json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+
+
+def _encode_multipart_fields(fields: Mapping[str, str], boundary: str) -> bytes:
+    """编码图片编辑接口所需的文本 multipart 字段。"""
+    chunks: list[bytes] = []
+    for name, value in fields.items():
+        chunks.extend(
+            [
+                f"--{boundary}\r\n".encode(),
+                f'Content-Disposition: form-data; name="{name}"\r\n\r\n'.encode(),
+                value.encode("utf-8"),
+                b"\r\n",
+            ]
+        )
+    chunks.append(f"--{boundary}--\r\n".encode())
+    return b"".join(chunks)
+
+
+def _parse_chat_response(payload: Any, request_id: str) -> dict[str, Any]:
+    """校验 Chat JSON 响应并提取可展示文本。"""
+    if not isinstance(payload, dict) or not isinstance(payload.get("choices"), list):
+        raise _invalid_response_error("chat", request_id, "Chat")
+    texts: list[str] = []
+    for choice in payload["choices"]:
+        if not isinstance(choice, dict):
+            raise _invalid_response_error("chat", request_id, "Chat")
+        message = choice.get("message")
+        if isinstance(message, dict):
+            content = message.get("content")
+            if isinstance(content, str):
+                texts.append(content)
+    return {
+        "id": payload.get("id"),
+        "status": "succeeded",
+        "text": "".join(texts),
+        "choices": payload["choices"],
+        "usage": payload.get("usage"),
+    }
+
+
+def _parse_gemini_response(payload: Any, request_id: str) -> dict[str, Any]:
+    """校验 Gemini JSON 响应并提取候选文本。"""
+    if not isinstance(payload, dict) or not isinstance(payload.get("candidates"), list):
+        raise _invalid_response_error("gemini", request_id, "Gemini")
+    texts: list[str] = []
+    for candidate in payload["candidates"]:
+        if not isinstance(candidate, dict):
+            raise _invalid_response_error("gemini", request_id, "Gemini")
+        content = candidate.get("content")
+        if isinstance(content, dict) and isinstance(content.get("parts"), list):
+            for part in content["parts"]:
+                if isinstance(part, dict) and isinstance(part.get("text"), str):
+                    texts.append(part["text"])
+    return {
+        "id": payload.get("responseId"),
+        "status": "succeeded",
+        "text": "".join(texts),
+        "candidates": payload["candidates"],
+        "usage": payload.get("usageMetadata"),
+    }
+
+
+def _parse_sse_response(body: bytes, phase: str, request_id: str) -> dict[str, Any]:
+    """解析 SSE 或逐行 data JSON，并累积文本增量。"""
+    try:
+        text_body = body.decode("utf-8")
+    except UnicodeDecodeError as error:
+        raise _invalid_response_error(phase, request_id, "流式") from error
+    events: list[dict[str, Any]] = []
+    text_parts: list[str] = []
+    for raw_line in text_body.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith(":"):
+            continue
+        if line.startswith("data:"):
+            line = line[5:].strip()
+        if line == "[DONE]":
+            continue
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(event, dict):
+            continue
+        events.append(event)
+        for choice in event.get("choices", []):
+            if not isinstance(choice, dict):
+                continue
+            message = choice.get("message") or choice.get("delta")
+            if isinstance(message, dict) and isinstance(message.get("content"), str):
+                text_parts.append(message["content"])
+        for candidate in event.get("candidates", []):
+            if not isinstance(candidate, dict):
+                continue
+            content = candidate.get("content")
+            for part in content.get("parts", []) if isinstance(content, dict) else []:
+                if isinstance(part, dict) and isinstance(part.get("text"), str):
+                    text_parts.append(part["text"])
+    if not events:
+        raise _invalid_response_error(phase, request_id, "流式")
+    return {
+        "id": events[0].get("id") or events[0].get("responseId"),
+        "status": "succeeded",
+        "text": "".join(text_parts),
+        "chunks": events,
+    }
 
 
 def _parse_generation_response(
