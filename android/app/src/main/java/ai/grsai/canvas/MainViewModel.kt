@@ -39,6 +39,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     var chatStream by mutableStateOf(false)
     var geminiGenerationConfigJson by mutableStateOf("{}")
     var videoAspectRatio by mutableStateOf("landscape")
+    var imageAspectRatio by mutableStateOf("auto")
+    var imageSize by mutableStateOf("1K")
     var videoResolution by mutableStateOf("768p")
     var videoDuration by mutableStateOf(5)
     var videoSeed by mutableStateOf<Int?>(null)
@@ -52,7 +54,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val canGenerate: Boolean
         get() = apiKey.isNotBlank() && prompt.isNotBlank() && !isSubmitting
 
-    /** 切换原生模型时同步接口模式和该视频模型的默认参数。 */
+    /** 切换原生模型时同步接口模式并修正不兼容的图片或视频参数。 */
     fun selectNativeModel(selected: GrsaiImageModel) {
         model = selected
         interfaceMode = if (selected.isVideo) GenerationInterface.NATIVE_VIDEO else GenerationInterface.NATIVE_IMAGE
@@ -60,6 +62,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             videoAspectRatio = selected.videoAspectRatios.first()
             videoResolution = if (selected == GrsaiImageModel.AGNES_VIDEO_2_5) "720p" else "768p"
             videoDuration = 5
+        } else if (imageAspectRatio !in selected.imageAspectRatios) {
+            imageAspectRatio = "auto"
         }
     }
 
@@ -95,6 +99,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val currentReferences = referenceUris
         val currentModel = model
         val currentAspectRatio = videoAspectRatio
+        val currentImageAspectRatio = imageAspectRatio
+        val currentImageSize = imageSize
         val currentResolution = videoResolution
         val currentDuration = videoDuration
         val currentSeed = videoSeed
@@ -154,7 +160,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         currentPrompt,
                         currentModel,
                         encodedReferences,
-                        currentAspectRatio.takeIf { currentModel.isVideo } ?: "auto",
+                        currentAspectRatio.takeIf { currentModel.isVideo } ?: currentImageAspectRatio,
+                        currentImageSize.takeIf { !currentModel.isVideo && !currentModel.isGptImage },
                         currentResolution.takeIf { currentModel.isVideo },
                         currentDuration.takeIf { currentModel.isVideo },
                         currentSeed.takeIf { currentModel.isVideo }
@@ -207,6 +214,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         referenceUris = emptyList()
         model = GrsaiImageModel.GPT_IMAGE_2
         videoAspectRatio = "landscape"
+        imageAspectRatio = "auto"
+        imageSize = "1K"
         videoResolution = "768p"
         videoDuration = 5
         videoSeed = null
@@ -268,6 +277,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             .enqueueUniqueWork("poll-${task.id}", ExistingWorkPolicy.REPLACE, request)
     }
 
+    /** 持久化任务及生成参数，供历史和后台续查恢复。 */
     private fun saveTasks() {
         val array = JSONArray()
         tasks.forEach { task ->
@@ -286,6 +296,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 put("references", JSONArray(task.referenceUris))
                 put("localPaths", JSONArray(task.localImagePaths))
                 put("aspectRatio", task.aspectRatio)
+                put("imageSize", task.imageSize)
                 put("resolution", task.resolution)
                 put("duration", task.duration)
                 put("seed", task.seed)
@@ -303,6 +314,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         return task.copy(localImagePaths = paths)
     }
 
+    /** 从应用私有存储恢复任务，并兼容旧记录缺失的字段。 */
     private fun loadTasks(): List<GenerationTask> = runCatching {
         val array = JSONArray(preferences.getString("tasks", "[]"))
         buildList {
@@ -322,6 +334,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     referenceUris = item.optJSONArray("references")?.let { refs -> List(refs.length()) { refs.getString(it) } } ?: emptyList(),
                     localImagePaths = item.optJSONArray("localPaths")?.let { paths -> List(paths.length()) { paths.getString(it) } } ?: emptyList(),
                     aspectRatio = item.optString("aspectRatio", "auto"),
+                    imageSize = item.optString("imageSize").takeIf { it in setOf("1K", "2K", "4K") },
                     resolution = item.optString("resolution").takeIf { it.isNotBlank() },
                     duration = item.optInt("duration", -1).takeIf { it >= 0 },
                     seed = if (item.has("seed") && !item.isNull("seed")) item.optInt("seed") else null

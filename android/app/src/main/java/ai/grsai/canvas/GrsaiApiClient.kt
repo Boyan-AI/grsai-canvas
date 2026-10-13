@@ -23,6 +23,7 @@ class GrsaiApiClient(private val baseUrl: String = "https://grsai.dakka.com.cn")
         model: GrsaiImageModel,
         referenceImages: List<String> = emptyList(),
         aspectRatio: String = if (model == GrsaiImageModel.AGNES_VIDEO_2_5) "16:9" else if (model.isVideo) "landscape" else "auto",
+        imageSize: String? = null,
         resolution: String? = null,
         duration: Int? = null,
         seed: Int? = null,
@@ -30,6 +31,7 @@ class GrsaiApiClient(private val baseUrl: String = "https://grsai.dakka.com.cn")
     ): GenerationTask =
         withContext(Dispatchers.IO) {
             if (model.isVideo) {
+                require(imageSize == null) { "视频不支持图片清晰度" }
                 require(aspectRatio in model.videoAspectRatios) { "当前视频模型不支持所选比例" }
                 val selectedResolution = resolution ?: if (model == GrsaiImageModel.AGNES_VIDEO_2_5) "720p" else "768p"
                 require(selectedResolution in model.videoResolutions) { "当前视频模型不支持所选分辨率" }
@@ -39,6 +41,8 @@ class GrsaiApiClient(private val baseUrl: String = "https://grsai.dakka.com.cn")
                 require(referenceAudios.size <= 3) { "视频参考音频最多允许 3 个" }
             } else {
                 require(referenceImages.size <= 8) { "参考图最多允许 8 张" }
+                require(aspectRatio in model.imageAspectRatios) { "当前图片模型不支持所选比例" }
+                require(imageSize == null || (!model.isGptImage && imageSize in setOf("1K", "2K", "4K"))) { "当前图片模型不支持所选清晰度" }
                 require(referenceAudios.isEmpty() && resolution == null && duration == null && seed == null) { "视频参数只适用于视频模型" }
             }
             val body = JSONObject()
@@ -48,6 +52,7 @@ class GrsaiApiClient(private val baseUrl: String = "https://grsai.dakka.com.cn")
                 .put("aspectRatio", aspectRatio)
                 .put("images", org.json.JSONArray(referenceImages).takeIf { referenceImages.isNotEmpty() })
                 .apply {
+                    imageSize?.let { put("imageSize", it) }
                     if (model.isVideo) {
                         put("resolution", resolution ?: if (model == GrsaiImageModel.AGNES_VIDEO_2_5) "720p" else "768p")
                         put("duration", duration ?: 5)
@@ -64,6 +69,7 @@ class GrsaiApiClient(private val baseUrl: String = "https://grsai.dakka.com.cn")
                 model = model,
                 mediaType = if (model.isVideo) GenerationMediaType.VIDEO else GenerationMediaType.IMAGE,
                 aspectRatio = aspectRatio,
+                imageSize = imageSize,
                 resolution = resolution,
                 duration = duration,
                 seed = seed

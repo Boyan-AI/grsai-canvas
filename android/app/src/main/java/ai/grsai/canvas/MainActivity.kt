@@ -125,11 +125,14 @@ private fun CredentialSection(model: MainViewModel) {
     }
 }
 
+/** 展示模型、参数和提示词，并将输入同步到工作台状态。 */
 @Composable
 private fun PromptSection(model: MainViewModel) {
     var prompt by remember(model.prompt) { mutableStateOf(model.prompt) }
     var modelMenuExpanded by remember { mutableStateOf(false) }
     var interfaceMenuExpanded by remember { mutableStateOf(false) }
+    var imageRatioMenuExpanded by remember { mutableStateOf(false) }
+    var imageSizeMenuExpanded by remember { mutableStateOf(false) }
     val picker = androidx.activity.compose.rememberLauncherForActivityResult(
         ActivityResultContracts.GetMultipleContents()
     ) { uris -> model.referenceUris = uris.take(if (model.interfaceMode == GenerationInterface.NATIVE_VIDEO) 9 else 8) }
@@ -208,6 +211,34 @@ private fun PromptSection(model: MainViewModel) {
                     singleLine = true,
                     label = { Text("generationConfig JSON（可选）") }
                 )
+            }
+            if (model.interfaceMode == GenerationInterface.NATIVE_IMAGE && !model.model.isVideo) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Column {
+                        OutlinedButton(onClick = { imageRatioMenuExpanded = true }) { Text("比例 ${model.imageAspectRatio}") }
+                        DropdownMenu(expanded = imageRatioMenuExpanded, onDismissRequest = { imageRatioMenuExpanded = false }) {
+                            model.model.imageAspectRatios.forEach { ratio ->
+                                DropdownMenuItem(text = { Text(ratio) }, onClick = {
+                                    model.imageAspectRatio = ratio
+                                    imageRatioMenuExpanded = false
+                                })
+                            }
+                        }
+                    }
+                    if (!model.model.isGptImage) {
+                        Column {
+                            OutlinedButton(onClick = { imageSizeMenuExpanded = true }) { Text("清晰度 ${model.imageSize}") }
+                            DropdownMenu(expanded = imageSizeMenuExpanded, onDismissRequest = { imageSizeMenuExpanded = false }) {
+                                listOf("1K", "2K", "4K").forEach { size ->
+                                    DropdownMenuItem(text = { Text(size) }, onClick = {
+                                        model.imageSize = size
+                                        imageSizeMenuExpanded = false
+                                    })
+                                }
+                            }
+                        }
+                    }
+                }
             }
             if (model.model.isVideo && model.interfaceMode == GenerationInterface.NATIVE_VIDEO) {
                 Text("视频比例：${model.videoAspectRatio}", color = Ink)

@@ -11,7 +11,8 @@
 - API Key 使用 Android Keystore 加密保存，关闭应用后仍保留。
 - Grsai 原生异步接口提交和同任务 ID 轮询。
 - 工作台支持原生图片、原生视频、OpenAI 图片生成、multipart 图片编辑、OpenAI Chat、Gemini `generateContent` 和 `streamGenerateContent`。
-- 模型清单已同步 `gpt-image-2.5`、Flare、Sunburst、VIP 变体、`nano-banana-2.1` 和 `agnes-video-2.5`。
+- 原生模型清单与 Python Skill、macOS 客户端一致：17 个图片模型和 2 个视频模型，包含 `nano-banana-2.1` 与 `agnes-video-2.5`。
+- 原生图片可选文档支持的比例；nano-banana 系列可选 1K、2K、4K 清晰度，请求前会拒绝不兼容组合。
 - 图片最多 8 张、视频最多 9 张 JPG、PNG、WEBP 参考图，并在请求前编码为 data URL。
 - 历史任务 JSON 持久化、删除和清空记录。
 - 图片结果支持双指缩放、拖动预览；视频结果使用系统 `VideoView` 播放本地缓存或 HTTPS 地址。

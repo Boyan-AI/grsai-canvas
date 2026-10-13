@@ -2,19 +2,39 @@ package ai.grsai.canvas
 
 /** Android 端支持的生图模型。 */
 enum class GrsaiImageModel(val value: String) {
+    NANO_BANANA("nano-banana"),
+    NANO_BANANA_FAST("nano-banana-fast"),
+    NANO_BANANA_2("nano-banana-2"),
+    NANO_BANANA_2_CL("nano-banana-2-cl"),
+    NANO_BANANA_2_2K_CL("nano-banana-2-2k-cl"),
+    NANO_BANANA_2_4K_CL("nano-banana-2-4k-cl"),
+    NANO_BANANA_2_1("nano-banana-2.1"),
+    NANO_BANANA_PRO("nano-banana-pro"),
+    NANO_BANANA_PRO_VT("nano-banana-pro-vt"),
+    NANO_BANANA_PRO_CL("nano-banana-pro-cl"),
+    NANO_BANANA_PRO_VIP("nano-banana-pro-vip"),
+    NANO_BANANA_PRO_4K_VIP("nano-banana-pro-4k-vip"),
     GPT_IMAGE_2("gpt-image-2"),
     GPT_IMAGE_2_VIP("gpt-image-2-vip"),
     GPT_IMAGE_2_5("gpt-image-2.5"),
     GPT_IMAGE_2_5_FLARE("gpt-image-2.5-flare"),
     GPT_IMAGE_2_5_SUNBURST("gpt-image-2.5-sunburst"),
     MINIMAX_H3("minimax-h3"),
-    AGNES_VIDEO_2_5("agnes-video-2.5"),
-    NANO_BANANA("nano-banana"),
-    NANO_BANANA_2("nano-banana-2"),
-    NANO_BANANA_2_1("nano-banana-2.1"),
-    NANO_BANANA_PRO("nano-banana-pro")
+    AGNES_VIDEO_2_5("agnes-video-2.5");
 
-    ;
+    /** 区分图片模型的参数规则。 */
+    val isGptImage: Boolean get() = value.startsWith("gpt-image-2")
+
+    /** 列出当前图片模型可用的比例。 */
+    val imageAspectRatios: List<String> get() {
+        val standard = listOf("auto", "1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "5:4", "4:5", "21:9")
+        return when {
+            this in setOf(GPT_IMAGE_2_VIP, GPT_IMAGE_2_5_FLARE, GPT_IMAGE_2_5_SUNBURST) -> listOf("auto")
+            isGptImage -> standard + listOf("9:21", "1:2", "2:1")
+            value.startsWith("nano-banana-2") -> standard + listOf("1:4", "4:1", "1:8", "8:1")
+            else -> standard
+        }
+    }
 
     /** 区分使用视频字段和图片字段的原生模型。 */
     val isVideo: Boolean get() = this == MINIMAX_H3 || this == AGNES_VIDEO_2_5
@@ -61,6 +81,7 @@ data class GenerationTask(
     val localImagePaths: List<String> = emptyList(),
     val textResult: String? = null,
     val aspectRatio: String = "auto",
+    val imageSize: String? = null,
     val resolution: String? = null,
     val duration: Int? = null,
     val seed: Int? = null,
