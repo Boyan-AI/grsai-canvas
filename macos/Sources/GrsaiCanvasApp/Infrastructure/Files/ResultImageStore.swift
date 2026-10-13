@@ -1,6 +1,6 @@
 import Foundation
 
-/// 下载并持久化成功任务的结果图片。
+/// 下载并持久化成功任务的图片或视频结果。
 actor ResultImageStore {
     private let directory: URL
     private let transport: any HTTPTransport
@@ -29,10 +29,10 @@ actor ResultImageStore {
         }
     }
 
-    /// 下载单张 HTTPS 图片并返回本地绝对路径。
+    /// 下载单个 HTTPS 媒体结果并返回本地绝对路径。
     func download(url: URL, taskID: String, index: Int) async throws -> String {
         guard url.scheme?.lowercased() == "https" else {
-            throw GrsaiClientError.invalidInput("结果图片地址必须使用 HTTPS")
+            throw GrsaiClientError.invalidInput("结果媒体地址必须使用 HTTPS")
         }
         var request = URLRequest(url: url)
         request.timeoutInterval = 45
@@ -61,7 +61,7 @@ actor ResultImageStore {
             throw GrsaiClientError.invalidResponse
         }
         guard !response.data.isEmpty, response.data.count <= maximumBytes else {
-            throw GrsaiClientError.persistence("结果图片为空或超过 50 MB")
+            throw GrsaiClientError.persistence("结果媒体为空或超过 50 MB")
         }
         let fileExtension = try detectedExtension(data: response.data)
         let safeTaskID = taskID.replacingOccurrences(
@@ -80,9 +80,9 @@ actor ResultImageStore {
     }
 
     /// 将用户原始参考图复制到应用缓存，确保历史任务不依赖外部文件位置。
-    func copyReferenceImages(urls: [URL], taskID: String) throws -> [String] {
-        guard urls.count <= ReferenceImageEncoder.maximumImageCount else {
-            throw GrsaiClientError.invalidInput("参考图最多允许 8 张")
+    func copyReferenceImages(urls: [URL], taskID: String, maximumCount: Int = ReferenceImageEncoder.maximumImageCount) throws -> [String] {
+        guard urls.count <= maximumCount else {
+            throw GrsaiClientError.invalidInput("参考图最多允许 (maximumCount) 张")
         }
         let referenceDirectory = directory.appendingPathComponent("References", isDirectory: true)
         var copiedPaths: [String] = []
@@ -149,7 +149,7 @@ actor ResultImageStore {
         }
     }
 
-    /// 通过文件签名识别允许持久化的图片格式。
+    /// 通过文件签名识别允许持久化的图片和视频格式。
     private func detectedExtension(data: Data) throws -> String {
         let bytes = [UInt8](data.prefix(12))
         if bytes.starts(with: [0x89, 0x50, 0x4E, 0x47]) { return "png" }
@@ -159,6 +159,12 @@ actor ResultImageStore {
            Array(bytes[8..<12]) == [0x57, 0x45, 0x42, 0x50] {
             return "webp"
         }
+        if bytes.count >= 8,
+           Array(bytes[4..<8]) == [0x66, 0x74, 0x79, 0x70] {
+            let brand = String(bytes: bytes[8..<12], encoding: .ascii) ?? ""
+            return brand == "qt  " ? "mov" : "mp4"
+        }
+        if bytes.starts(with: [0x1A, 0x45, 0xDF, 0xA3]) { return "webm" }
         throw GrsaiClientError.invalidResponse
     }
 }

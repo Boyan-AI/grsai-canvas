@@ -3,9 +3,10 @@
 set -euo pipefail
 
 SCRIPT_DIRECTORY="$(cd -- "$(dirname -- "$0")" && pwd)"
+MACOS_DIRECTORY="${SCRIPT_DIRECTORY}/macos"
 PRODUCT_NAME="画境"
 LEGACY_PRODUCT_NAME="Grsai Canvas"
-SOURCE_APP="${SCRIPT_DIRECTORY}/.build/app/${PRODUCT_NAME}.app"
+SOURCE_APP="${MACOS_DIRECTORY}/.build/app/${PRODUCT_NAME}.app"
 
 if [[ -n "${GRSAI_INSTALL_DIRECTORY:-}" ]]; then
     INSTALL_DIRECTORY="${GRSAI_INSTALL_DIRECTORY}"
@@ -20,7 +21,7 @@ if [[ "${INSTALL_DIRECTORY}" != /* ]]; then
 fi
 
 /bin/mkdir -p "${INSTALL_DIRECTORY}"
-"${SCRIPT_DIRECTORY}/scripts/build-app.sh" release
+"${MACOS_DIRECTORY}/scripts/build-app.sh" release
 
 if [[ ! -d "${SOURCE_APP}" ]]; then
     echo "构建产物不存在：${SOURCE_APP}" >&2

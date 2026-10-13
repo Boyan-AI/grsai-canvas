@@ -63,4 +63,43 @@ struct ResultImageStoreTests {
         }
         #expect(FileManager.default.fileExists(atPath: outsideFile.path))
     }
+
+    /// 注入 MP4 文件签名，确认视频结果不会被保存成图片扩展名。
+    @Test("保存 MP4 视频结果")
+    func downloadsVideoResult() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let imagesDirectory = root.appendingPathComponent("images", isDirectory: true)
+        let mp4 = Data([0, 0, 0, 0x18, 0x66, 0x74, 0x79, 0x70, 0x69, 0x73, 0x6F, 0x6D])
+        let transport = StubStoreTransport(.success(HTTPTransportResponse(
+            data: mp4,
+            statusCode: 200,
+            headers: ["Content-Type": "video/mp4"]
+        )))
+        let store = ResultImageStore(directory: imagesDirectory, transport: transport)
+
+        let path = try await store.download(
+            url: URL(string: "https://video.example/result")!,
+            taskID: "video-task",
+            index: 1
+        )
+
+        #expect(path.hasSuffix(".mp4"))
+    }
+}
+
+/// 返回单条结果的测试传输层。
+private actor StubStoreTransport: HTTPTransport {
+    let result: Result<HTTPTransportResponse, Error>
+
+    /// 创建固定响应。
+    init(_ result: Result<HTTPTransportResponse, Error>) {
+        self.result = result
+    }
+
+    /// 返回固定响应，不访问网络。
+    func send(_ request: URLRequest) async throws -> HTTPTransportResponse {
+        try result.get()
+    }
 }

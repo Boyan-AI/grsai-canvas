@@ -65,6 +65,40 @@ struct GrsaiAPIClientTests {
         #expect(json["replyType"] as? String == "async")
     }
 
+    /// 验证 minimax-h3 请求体使用视频字段和异步响应。
+    @Test("提交 minimax-h3 视频请求")
+    func submitBuildsVideoRequest() async throws {
+        let transport = StubTransport([
+            .success(response(#"{"id":"video-1","status":"running","progress":4}"#))
+        ])
+        let client = try GrsaiAPIClient(
+            baseURL: URL(string: "https://example.test")!,
+            transport: transport
+        )
+        let draft = GenerationDraft(
+            prompt: "湖面镜头",
+            model: .minimaxH3,
+            aspectRatio: .landscape,
+            imageSize: nil,
+            referenceImages: [],
+            referenceAudios: ["https://audio.example/ref.mp3"],
+            videoResolution: .p768,
+            videoDuration: 6,
+            videoSeed: 7
+        )
+
+        _ = try await client.submit(draft: draft, apiKey: "test-token")
+        let body = try #require(await transport.lastRequest()?.httpBody)
+        let json = try #require(JSONSerialization.jsonObject(with: body) as? [String: Any])
+
+        #expect(json["model"] as? String == "minimax-h3")
+        #expect(json["aspectRatio"] as? String == "landscape")
+        #expect(json["resolution"] as? String == "768p")
+        #expect(json["duration"] as? Int == 6)
+        #expect(json["seed"] as? Int == 7)
+        #expect((json["audios"] as? [String]) == ["https://audio.example/ref.mp3"])
+    }
+
     @Test("查询只复用已有任务 ID")
     func resultUsesExistingTaskID() async throws {
         let transport = StubTransport([

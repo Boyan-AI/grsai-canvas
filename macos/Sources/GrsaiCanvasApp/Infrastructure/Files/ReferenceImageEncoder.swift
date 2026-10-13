@@ -3,13 +3,14 @@ import Foundation
 /// 校验本地参考图并转换为 Grsai 接受的 data URL。
 enum ReferenceImageEncoder {
     static let maximumImageCount = 8
+    static let maximumVideoImageCount = 9
     static let maximumSingleImageBytes = 10 * 1024 * 1024
     static let maximumTotalBytes = 8 * 1024 * 1024
 
-    /// 读取最多八张参考图，并执行格式与体积限制。
-    static func encode(urls: [URL]) throws -> [ReferenceImagePayload] {
-        guard urls.count <= maximumImageCount else {
-            throw GrsaiClientError.invalidInput("参考图最多允许 8 张")
+    /// 读取参考图并执行格式与体积限制，视频模型可使用第九张参考图。
+    static func encode(urls: [URL], maximumCount: Int = maximumImageCount) throws -> [ReferenceImagePayload] {
+        guard urls.count <= maximumCount else {
+            throw GrsaiClientError.invalidInput("参考图最多允许 (maximumCount) 张")
         }
         var totalBytes = 0
         return try urls.map { url in
