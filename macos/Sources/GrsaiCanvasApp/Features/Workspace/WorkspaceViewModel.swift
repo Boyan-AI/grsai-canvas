@@ -24,24 +24,31 @@ final class WorkspaceViewModel {
             if !selectedModel.supportedAspectRatios.contains(selectedAspectRatio) {
                 selectedAspectRatio = selectedModel.isVideo ? .landscape : .automatic
             }
+            if selectedModel.isVideo && !selectedModel.supportedVideoResolutions.contains(selectedVideoResolution) {
+                selectedVideoResolution = selectedModel == .agnesVideo25 ? .p720 : .p768
+            }
+            if selectedModel.isVideo {
+                selectedVideoDuration = min(max(selectedVideoDuration, selectedModel.videoDurationRange.lowerBound), maximumVideoDuration)
+            }
         }
     }
     var selectedAspectRatio: GenerationAspectRatio = .automatic
     var selectedImageSize: GenerationImageSize = .oneK
     var selectedVideoResolution: GenerationVideoResolution = .p768 {
         didSet {
-            if selectedVideoResolution == .p1080 {
-                selectedVideoDuration = min(selectedVideoDuration, 10)
-            }
+            selectedVideoDuration = min(selectedVideoDuration, maximumVideoDuration)
         }
     }
     var selectedVideoDuration = 5 {
         didSet {
-            let maximum = selectedVideoResolution == .p1080 ? 10 : 15
-            if selectedVideoDuration > maximum {
-                selectedVideoDuration = maximum
+            if selectedModel.isVideo && selectedVideoDuration > maximumVideoDuration {
+                selectedVideoDuration = maximumVideoDuration
             }
         }
+    }
+    /// 当前视频模型和分辨率共同限定的最长时长。
+    var maximumVideoDuration: Int {
+        selectedModel == .minimaxH3 && selectedVideoResolution == .p1080 ? 10 : selectedModel.videoDurationRange.upperBound
     }
     var selectedVideoSeed: Int?
     var serviceModel = "gemini-3.1-pro"
@@ -60,7 +67,7 @@ final class WorkspaceViewModel {
     /// 当前统一模型菜单对应的选项，兼容旧字段以保持请求和历史记录格式稳定。
     var selectedModelOption: GenerationModelOption {
         switch interfaceMode {
-        case .nativeImage, .nativeVideo: .native(selectedModel.isVideo ? .minimaxH3 : selectedModel)
+        case .nativeImage, .nativeVideo: .native(selectedModel)
         case .openAIImage, .imageEdit, .openAIChat, .gemini, .geminiStream:
             .native(.gptImage2)
         }

@@ -270,6 +270,44 @@ class GrsaiCliOrchestrationTests(unittest.TestCase):
         self.assertEqual(result.payload["error"]["code"], "INVALID_PARAMETER_COMBINATION")
         self.assertEqual(calls, 0)
 
+    def test_agnes_video_uses_its_own_defaults_and_media_type(self) -> None:
+        """agnes 视频使用文档默认比例和分辨率，并保留视频媒体类型。"""
+        client = FakeClient(generate_result={"id": "agnes-1", "status": "running"})
+        result = run_command(
+            ["generate", "--prompt", "海边日落", "--model", "agnes-video-2.5", "--no-wait"],
+            {"GRSAI_API_KEY": "test-key"},
+            client_factory=lambda _config: client,
+        )
+
+        self.assertEqual(result.exit_code, 0)
+        self.assertEqual(result.payload["media_type"], "video")
+        self.assertEqual(client.generate_calls[0][0]["aspectRatio"], "16:9")
+        self.assertEqual(client.generate_calls[0][0]["resolution"], "720p")
+        self.assertEqual(client.generate_calls[0][0]["duration"], 5)
+
+    def test_agnes_video_rejects_minimax_parameters(self) -> None:
+        """agnes 不接受 minimax 专有的比例、分辨率和过短时长。"""
+        for option in (("--aspect-ratio", "landscape"), ("--resolution", "768p"), ("--duration", "3")):
+            result = run_command(
+                ["generate", "--prompt", "海边日落", "--model", "agnes-video-2.5", *option],
+                {"GRSAI_API_KEY": "test-key"},
+                client_factory=lambda _config: self.fail("非法参数不应创建客户端"),
+            )
+            self.assertEqual(result.exit_code, 2)
+            self.assertEqual(result.payload["error"]["code"], "INVALID_PARAMETER_COMBINATION")
+
+    def test_nano_banana_21_accepts_documented_extra_ratio(self) -> None:
+        """nano-banana-2.1 接受 2 系列额外比例。"""
+        client = FakeClient(generate_result={"id": "nano-21", "status": "running"})
+        result = run_command(
+            ["generate", "--prompt", "长卷山水", "--model", "nano-banana-2.1", "--aspect-ratio", "1:8", "--no-wait"],
+            {"GRSAI_API_KEY": "test-key"},
+            client_factory=lambda _config: client,
+        )
+
+        self.assertEqual(result.exit_code, 0)
+        self.assertEqual(client.generate_calls[0][0]["aspectRatio"], "1:8")
+
     def test_native_gpt_25_sends_quality_background_and_mask(self) -> None:
         """新版 GPT 原生接口应把质量、透明背景和遮罩传入请求体。"""
         client = FakeClient(

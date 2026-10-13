@@ -12,7 +12,7 @@
 
 - `POST /v1/api/generate`
 - `GET /v1/api/result?id=<task_id>`
-- 模型：图片模型，以及视频模型 `minimax-h3`
+- 模型：图片模型（含 `nano-banana-2.1`），以及视频模型 `minimax-h3`、`agnes-video-2.5`
 - 通用字段：`model`、`prompt`、`images`、`aspectRatio`、`replyType: async`
 - GPT 扩展字段：`quality`、`background: transparent`、原生接口 `mask`
 - 返回：`id`、`status`、可选 `progress`、`results[].url`、`error`
@@ -21,6 +21,7 @@
 Python Skill 会在请求前校验模型能力：
 
 - `nano-banana` 使用 `aspectRatio` 加 `imageSize: 1K|2K|4K`。
+- `nano-banana-2.1` 沿用 2 系列参数，并可使用 `1:4`、`4:1`、`1:8`、`8:1` 额外比例。
 - `gpt-image-2` 和 `gpt-image-2.5` 使用文档比例或 1K 像素值。
 - `gpt-image-2-vip`、`gpt-image-2.5-flare`、`gpt-image-2.5-sunburst` 使用 `auto` 或文档像素值；VIP 允许满足边长、比例和像素总数约束的自定义像素值。
 - `quality` 按模型能力表校验；透明背景只允许 GPT Premium 模型。
@@ -29,8 +30,9 @@ Python Skill 会在请求前校验模型能力：
 ### 原生异步视频生成
 
 - `POST /v1/api/generate` 使用 `model: minimax-h3`，查询仍使用 `GET /v1/api/result?id=<task_id>`。
-- 请求字段：`prompt`、`aspectRatio: portrait|landscape|square`、`images`（最多 9 张）、`audios`（最多 3 个）、`resolution: 480p|768p|1080p`、`duration`（1–15 秒）、`replyType: async` 和可选 `seed`。
+- 请求字段：`prompt`、`aspectRatio: portrait|landscape`、`images`（最多 9 张）、`audios`（最多 3 个）、`resolution: 480p|768p|1080p`、`duration`（1–15 秒）、`replyType: async` 和可选 `seed`。
 - `1080p` 时 `duration` 最多 10 秒；Python Skill 支持 HTTPS、data URL 和本地音频参考。
+- `agnes-video-2.5` 复用异步提交与查询，但使用比例 `16:9|9:16|21:9|4:3|1:1|3:4`、分辨率 `720p|1080p|2k`、4–12 秒时长；参考图和音频上限仍为 9 张、3 个。
 - 视频结果仍返回 `results[].url`，客户端以 `media_type: video` 保存历史并使用视频播放器预览；单文件下载上限继续为 50 MB。
 
 ### OpenAI 图片生成兼容接口
@@ -66,7 +68,7 @@ Python Skill 会在请求前校验模型能力：
 | --- | --- | --- | --- | --- |
 | 原生图片生成 | `generate` | 原生图片 | 原生图片 | 异步图片任务 |
 | GPT 图片生成 | `generate` / OpenAI 兼容 | OpenAI 图片 | OpenAI 图片 | 同步图片 |
-| `minimax-h3` 视频 | `generate` | 原生视频 | 原生视频 | 异步视频 |
+| `minimax-h3` / `agnes-video-2.5` 视频 | `generate` | 原生视频 | 原生视频 | 异步视频 |
 | 异步查询 | `get` | 自动轮询 | 自动轮询与后台续查 | 图片/视频 |
 | Gemini `generateContent` | `gemini` | Gemini | Gemini | 文本 |
 | Gemini `streamGenerateContent` | `gemini --stream` | Gemini 流式 | Gemini 流式 | 累积文本 |

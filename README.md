@@ -6,7 +6,7 @@
 
 ## Android 客户端（开发中）
 
-Android 版本位于 `android/`，使用 Kotlin、Jetpack Compose 和 Android SDK 36，复用 macOS 版本的 Grsai 任务契约与费用边界。当前已包含 API Key 的 Keystore 加密保存、原生图片、OpenAI 图片生成、图片编辑、`minimax-h3` 视频、OpenAI Chat、Gemini 普通/流式接口、参考图、历史任务持久化、任务轮询、后台 WorkManager 续查、结果媒体本地缓存和按媒体类型预览。
+Android 版本位于 `android/`，使用 Kotlin、Jetpack Compose 和 Android SDK 36，复用 macOS 版本的 Grsai 任务契约与费用边界。当前已包含 API Key 的 Keystore 加密保存、原生图片、OpenAI 图片生成、图片编辑、`minimax-h3` 和 `agnes-video-2.5` 视频、OpenAI Chat、Gemini 普通/流式接口、参考图、历史任务持久化、任务轮询、后台 WorkManager 续查、结果媒体本地缓存和按媒体类型预览。
 
 Android 构建依赖 Android Studio 或已配置的 Gradle/JDK；当前环境已完成 Debug APK 构建。开发阶段请使用 Mock 或测试 Key，点击生成会产生真实 Grsai 费用。
 
@@ -48,9 +48,9 @@ scripts/build-app.sh debug
 主要能力：
 
 - 左侧历史与结果画廊，右侧为生成控制台。
-- 支持文生图，以及 `minimax-h3` 文生视频；图片最多 8 张、视频最多 9 张 JPG、JPEG、PNG、WEBP 参考图。
-- 工作台支持原生图片、原生视频、OpenAI 图片、图片编辑、OpenAI Chat、Gemini 和 Gemini 流式七种接口模式；文本响应会以文本卡片进入历史。
-- 支持 gpt-image-2、gpt-image-2.5 系列与 nano-banana 系列，并按模型限制比例、像素尺寸、质量和透明背景组合。
+- 支持文生图，以及 `minimax-h3`、`agnes-video-2.5` 文生视频；图片最多 8 张、视频最多 9 张 JPG、JPEG、PNG、WEBP 参考图。
+- 工作台通过按 Image、Video 分组的统一模型菜单选择原生图片和视频能力。
+- 支持 gpt-image-2、gpt-image-2.5 系列与 nano-banana 系列（含 `nano-banana-2.1`），并按模型限制比例、像素尺寸、质量和透明背景组合。
 - OpenAI 图片生成与编辑支持服务模型、质量和背景字段；Chat 支持文本/参考图与流式开关；Gemini 支持参考图和 generationConfig JSON。
 - 提交成功后立即保存任务 ID，后续只查询同一 ID；应用重启后可恢复未完成任务。
 - 成功图片或视频下载到 `~/Library/Application Support/Grsai Canvas/Images/`，支持 Finder 定位、另存为和按媒体类型预览。
@@ -81,7 +81,7 @@ scripts/build-app.sh
 
 ## 当前能力
 
-- `generate`：按提示词生成或编辑图片，或使用 `minimax-h3` 生成异步视频；视频支持比例、480p/768p/1080p、1–15 秒时长、seed 和参考音频。
+- `generate`：按提示词生成或编辑图片，或使用 `minimax-h3`、`agnes-video-2.5` 生成异步视频；视频按模型选择比例、分辨率和时长，并支持 seed 和参考音频。
 - `edit`：调用 multipart 图片编辑接口。
 - `chat`：调用 OpenAI Chat，支持普通和 SSE 流式响应。
 - `gemini`：调用 Gemini `generateContent`，支持普通和 SSE 流式响应。

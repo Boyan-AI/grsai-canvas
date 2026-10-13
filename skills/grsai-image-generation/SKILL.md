@@ -38,7 +38,7 @@ export GRSAI_API_KEY="你的密钥"
 7. 任务成功后展示 HTTPS 结果 URL。若采用 `--no-wait` 且需要本地文件，先单独创建输出目录，再下载 `get` 返回的 URL 并校验文件类型和尺寸。只有在网络与输出捕获都可靠时，才用 `generate --output-dir` 的同步下载流程。
 8. 错误含 `acceptance_unknown: true` 时，上游可能已经接收或计费；保留 `request_id`，停止自动重试，明确告知重试可能产生重复费用，并重新获得用户授权。若需确认是否计费，查看 Grsai 后台任务或账单，不要从客户端错误臆测。
 
-视频模型 `minimax-h3` 使用原生异步接口：传入 `--aspect-ratio portrait|landscape|square`、`--resolution 480p|768p|1080p`、`--duration 1..15` 和可选 `--seed`；参考图最多 9 张，参考音频用可重复的 `--reference-audio`，最多 3 个。1080p 最长 10 秒。视频任务输出包含 `media_type: "video"`，下载器按响应签名保存视频文件。
+视频模型使用原生异步接口：`minimax-h3` 支持 `--aspect-ratio portrait|landscape`、`--resolution 480p|768p|1080p`、`--duration 1..15`（1080p 最长 10 秒）；`agnes-video-2.5` 支持 `--aspect-ratio 16:9|9:16|21:9|4:3|1:1|3:4`、`--resolution 720p|1080p|2k`、`--duration 4..12`。两者均可传 `--seed`、最多 9 张参考图和最多 3 个 `--reference-audio`。视频任务输出包含 `media_type: "video"`，下载器按响应签名保存视频文件。
 
 典型命令（参数名称与 `--help` 一致）：
 
@@ -110,7 +110,7 @@ Chat、Gemini 和编辑请求会返回稳定 JSON 文本或图片结果；流式
 - 除 `--help` 外，标准输出只包含一个 UTF-8 JSON 对象；诊断摘要写入标准错误，不输出 traceback。
 - 退出码 `0` 表示成功、仍在运行或 `doctor` 已完成；`2` 表示参数/配置错误；`3` 表示上游、生成或下载失败。
 - 成功或运行中的结果包含 `request_id`、`id`、`status`、`urls`、`files`，运行中可能包含 `progress`。
-- 结果同时包含 `media_type`：图片为 `image`，`minimax-h3` 视频为 `video`，Chat/Gemini 为 `text`。
+- 结果同时包含 `media_type`：图片为 `image`，原生视频模型为 `video`，Chat/Gemini 为 `text`。
 - 失败结果包含 `status: "failed"`、`urls: []`、`files: []` 以及 `error.code`、`message`、`phase`、`backend`、`retryable`、`acceptance_unknown`；可选字段用于 HTTP 状态、上游请求 ID 和超时诊断。
 - 向用户展示结果 URL 和已下载的本地路径；明确说明任务仍在运行、内容安全拦截或失败阶段，并保留任务 ID 供续查。
 
@@ -120,7 +120,7 @@ Chat、Gemini 和编辑请求会返回稳定 JSON 文本或图片结果；流式
 - 单张本地参考图默认最多 10 MB，内联参考图解码总量默认最多 8 MB；大图应先压缩或改用 HTTPS URL。
 - `--image-size` 只用于 nano-banana 系列。`gpt-image-2` 和 `gpt-image-2.5` 接受文档比例或 1K 像素值；`gpt-image-2-vip`、`gpt-image-2.5-flare` 和 `gpt-image-2.5-sunburst` 接受文档定义的像素尺寸，VIP 还接受满足约束的自定义像素值。
 - `--quality` 按模型能力校验；`--background transparent` 只用于 GPT Premium；原生 `--mask` 只接受 HTTPS 地址。
-- `minimax-h3` 只使用原生后端；视频参数为 `--aspect-ratio`、`--resolution`、`--duration`、`--seed`，音频参考使用 `--reference-audio`，支持 HTTPS、data URL 和本地 AAC/FLAC/M4A/MP3/OGG/OPUS/WAV 文件。
+- 视频模型只使用原生后端；视频参数为 `--aspect-ratio`、`--resolution`、`--duration`、`--seed`，音频参考使用 `--reference-audio`，支持 HTTPS、data URL 和本地 AAC/FLAC/M4A/MP3/OGG/OPUS/WAV 文件。
 - 结果下载器支持图片和 MP4/MOV/WebM，单文件默认最多 50 MB；视频下载不绕过 HTTPS、重定向和大小校验。
 - OpenAI 兼容后端使用 `size`、`quality` 和 `background` 字段。
 - 生图不是精确排版或逐帧动画引擎。Sprite sheet、固定网格和严格透明补格应由本地程序确定性合成与校验。

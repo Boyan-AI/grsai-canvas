@@ -34,6 +34,7 @@ IMAGE_MODELS = (
     "nano-banana-2-cl",
     "nano-banana-2-2k-cl",
     "nano-banana-2-4k-cl",
+    "nano-banana-2.1",
     "nano-banana-pro",
     "nano-banana-pro-vt",
     "nano-banana-pro-cl",
@@ -45,31 +46,18 @@ IMAGE_MODELS = (
     "gpt-image-2.5-flare",
     "gpt-image-2.5-sunburst",
 )
-VIDEO_MODELS = ("minimax-h3",)
-VIDEO_ASPECT_RATIOS = ("portrait", "landscape", "square")
-VIDEO_RESOLUTIONS = ("480p", "768p", "1080p")
-ASPECT_RATIOS = (
-    "auto",
-    "1:1",
-    "16:9",
-    "9:16",
-    "4:3",
-    "3:4",
-    "3:2",
-    "2:3",
-    "5:4",
-    "4:5",
-    "21:9",
-    "9:21",
-    "1:2",
-    "2:1",
-    "1:3",
-    "3:1",
-    "1:4",
-    "4:1",
-    "1:8",
-    "8:1",
-)
+VIDEO_MODELS = ("minimax-h3", "agnes-video-2.5")
+VIDEO_ASPECT_RATIOS = {
+    "minimax-h3": ("portrait", "landscape"),
+    "agnes-video-2.5": ("16:9", "9:16", "21:9", "4:3", "1:1", "3:4"),
+}
+VIDEO_RESOLUTIONS = ("480p", "768p", "720p", "1080p", "2k")
+VIDEO_RESOLUTIONS_BY_MODEL = {
+    "minimax-h3": ("480p", "768p", "1080p"),
+    "agnes-video-2.5": ("720p", "1080p", "2k"),
+}
+NANO_STANDARD_ASPECT_RATIOS = ("auto", "1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "5:4", "4:5", "21:9")
+NANO_2_EXTRA_ASPECT_RATIOS = ("1:4", "4:1", "1:8", "8:1")
 GPT_IMAGE_PIXEL_SIZES = ("1024x1024", "1536x1024", "1024x1536")
 IMAGE_SIZES = ("1K", "2K", "4K")
 GPT_PREMIUM_MODELS = (
@@ -263,7 +251,7 @@ def _build_parser() -> JsonArgumentParser:
     )
     generate.add_argument(
         "--aspect-ratio",
-        help="图片比例/像素尺寸，或视频 portrait、landscape、square",
+        help="图片比例/像素尺寸，或当前视频模型支持的比例",
     )
     generate.add_argument(
         "--reference-audio",
@@ -272,7 +260,7 @@ def _build_parser() -> JsonArgumentParser:
         help="视频可重复传入 HTTPS URL、data URL 或本地音频路径",
     )
     generate.add_argument("--resolution", choices=VIDEO_RESOLUTIONS)
-    generate.add_argument("--duration", type=int, help="视频时长，单位秒，范围 1-15")
+    generate.add_argument("--duration", type=int, help="视频时长，minimax 1-15 秒，agnes 4-12 秒")
     generate.add_argument("--seed", type=int, help="视频随机种子")
     generate.add_argument("--image-size", choices=IMAGE_SIZES)
     generate.add_argument("--quality", choices=QUALITY_VALUES)
@@ -435,15 +423,18 @@ def _validate_generation_combination(
         invalid = []
         if backend != "native":
             invalid.append("视频仅支持 native 后端")
-        if aspect_ratio is not None and aspect_ratio not in VIDEO_ASPECT_RATIOS:
-            invalid.append("视频比例必须是 portrait、landscape 或 square")
+        if aspect_ratio is not None and aspect_ratio not in VIDEO_ASPECT_RATIOS[model]:
+            invalid.append(f"{model} 不支持该视频比例")
+        if resolution is not None and resolution not in VIDEO_RESOLUTIONS_BY_MODEL[model]:
+            invalid.append(f"{model} 不支持该视频分辨率")
         if image_size or quality or background or mask:
             invalid.append("视频不支持 image-size、quality、background 或 mask")
         if len(reference_audio) > 3:
             invalid.append("视频最多支持 3 个参考音频")
-        if duration is not None and not 1 <= duration <= 15:
-            invalid.append("视频时长必须在 1 到 15 秒之间")
-        if resolution == "1080p" and duration is not None and duration > 10:
+        minimum_duration, maximum_duration = (4, 12) if model == "agnes-video-2.5" else (1, 15)
+        if duration is not None and not minimum_duration <= duration <= maximum_duration:
+            invalid.append(f"{model} 视频时长必须在 {minimum_duration} 到 {maximum_duration} 秒之间")
+        if model == "minimax-h3" and resolution == "1080p" and duration is not None and duration > 10:
             invalid.append("1080p 视频时长最多 10 秒")
         if invalid:
             raise GrsaiError(
@@ -455,7 +446,7 @@ def _validate_generation_combination(
         return
     if reference_audio or resolution or duration is not None or seed is not None:
         raise GrsaiError(
-            "视频参数只适用于 minimax-h3",
+            "视频参数只适用于视频模型",
             code="INVALID_PARAMETER_COMBINATION",
             phase="input",
             request_id=request_id,
@@ -478,7 +469,9 @@ def _validate_generation_combination(
         message = "openai-compatible 仅接受 auto 或标准像素尺寸"
     elif aspect_ratio and is_gpt_image:
         message = _validate_gpt_aspect_ratio(model, aspect_ratio)
-    elif aspect_ratio and not is_gpt_image and aspect_ratio not in ASPECT_RATIOS:
+    elif aspect_ratio and not is_gpt_image and aspect_ratio not in (
+        NANO_STANDARD_ASPECT_RATIOS + (NANO_2_EXTRA_ASPECT_RATIOS if model.startswith("nano-banana-2") else ())
+    ):
         message = "nano-banana 仅接受文档列出的比例"
     if quality and quality not in QUALITY_BY_MODEL.get(model, ()):
         message = f"{model} 不支持 quality={quality}"
@@ -579,8 +572,8 @@ def _run_generate(
             }
             if is_video:
                 # 视频接口使用独立字段，默认值与文档允许范围保持一致。
-                payload["aspectRatio"] = arguments.aspect_ratio or "landscape"
-                payload["resolution"] = arguments.resolution or "768p"
+                payload["aspectRatio"] = arguments.aspect_ratio or ("16:9" if arguments.model == "agnes-video-2.5" else "landscape")
+                payload["resolution"] = arguments.resolution or ("720p" if arguments.model == "agnes-video-2.5" else "768p")
                 payload["duration"] = arguments.duration or 5
                 if images:
                     payload["images"] = images
